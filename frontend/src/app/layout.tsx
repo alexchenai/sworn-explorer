@@ -12,7 +12,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <Navbar />
-        <main style={{ maxWidth: 1200, margin: '0 auto', padding: '1.5rem' }}>
+        <main style={{ maxWidth: 1200, margin: '0 auto', padding: '1.5rem 1rem' }}>
           {children}
         </main>
         <footer style={{

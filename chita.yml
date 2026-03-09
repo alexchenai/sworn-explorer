@@ -15,6 +15,6 @@ services:
             - main.go
             - go.mod
             - go.sum
-            - static
+            - frontend
             - Dockerfile
         working_directory: /app/data/sworn-explorer

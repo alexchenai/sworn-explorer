@@ -274,9 +274,28 @@ tr { cursor: pointer; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* Responsive */
+@media (max-width: 900px) {
+  .two-col { grid-template-columns: 1fr !important; }
+}
+
 @media (max-width: 768px) {
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
   .detail-grid { grid-template-columns: 1fr; }
+  .nav-tabs { display: none !important; }
+  .nav-hamburger { display: flex !important; }
+  .nav-mobile-menu { display: flex !important; }
+}
+
+@media (max-width: 480px) {
+  .stat-grid { grid-template-columns: 1fr; gap: 0.5rem; }
+  .stat-box { padding: 0.75rem; }
+  .stat-value { font-size: 1.2rem; }
+  body { font-size: 13px; }
+  th, td { padding: 0.5rem 0.6rem; font-size: 0.75rem; }
+  .section-title { font-size: 0.9rem; }
+  .detail-title { font-size: 1.1rem; }
+  .kv-row { flex-direction: column; gap: 0.15rem; }
+  .kv-val { text-align: left; }
 }
 
 /* Addr */
