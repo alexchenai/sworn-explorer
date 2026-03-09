@@ -37,8 +37,8 @@ function ContractDetailView({ id }: { id: string }) {
           <div className="detail-card-title">Contract Info</div>
           <KVRow label="Requester" value={<Link href={`/agents/?view=${contract.requester}`}>{shortAddr(contract.requester)}</Link>} />
           <KVRow label="Provider" value={<Link href={`/agents/?view=${contract.provider}`}>{shortAddr(contract.provider)}</Link>} />
-          <KVRow label="Value" value={`${(contract.value_sol ?? 0).toFixed(4)} SWORN`} />
-          <KVRow label="Provider Stake" value={`${(contract.provider_stake_sol ?? 0).toFixed(4)} SWORN`} />
+          <KVRow label="Value" value={`${(contract.value_sworn ?? 0).toFixed(4)} SWORN`} />
+          <KVRow label="Provider Stake" value={`${(contract.provider_stake_sworn ?? 0).toFixed(4)} SWORN`} />
           <KVRow label="Status" value={<StatusBadge status={contract.status} />} mono={false} />
           <KVRow label="Dispute Level" value={contract.dispute_level} />
         </div>
@@ -118,7 +118,7 @@ function ContractsList() {
                 <td><Link href={`/contracts/?view=${c.id}`} className="addr">#{c.id}</Link></td>
                 <td><Link href={`/agents/?view=${c.requester}`} className="addr">{shortAddr(c.requester)}</Link></td>
                 <td><Link href={`/agents/?view=${c.provider}`} className="addr">{shortAddr(c.provider)}</Link></td>
-                <td className="mono">{(c.value_sol ?? 0).toFixed(4)}</td>
+                <td className="mono">{(c.value_sworn ?? 0).toFixed(4)}</td>
                 <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--text-muted)' }}>{c.poe_arweave_tx || '—'}</td>
                 <td style={{ color: 'var(--text-dim)' }}>{fmtDate(c.created_at)}</td>
                 <td><StatusBadge status={c.status} /></td>

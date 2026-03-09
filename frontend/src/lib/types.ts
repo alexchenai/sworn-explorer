@@ -8,7 +8,7 @@ export interface Agent {
   disputes_lost: number;
   disputes_won: number;
   fraud_flags: number;
-  volume_processed_sol: number;
+  volume_processed_sworn: number;
   identity_bond_sworn: number;
   sponsor_bonus: number;
   registration_date: string;
@@ -22,9 +22,9 @@ export interface Contract {
   pubkey: string;
   requester: string;
   provider: string;
-  value_sol: number;
-  provider_stake_sol: number;
-  requester_stake_sol: number;
+  value_sworn: number;
+  provider_stake_sworn: number;
+  requester_stake_sworn: number;
   status: string;
   created_at: string;
   resolved_at?: string;

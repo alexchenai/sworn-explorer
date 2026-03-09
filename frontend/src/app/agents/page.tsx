@@ -42,7 +42,7 @@ function AgentDetailView({ pubkey }: { pubkey: string }) {
           <KVRow label="Disputes Lost" value={<span style={{ color: agent.disputes_lost > 0 ? 'var(--red)' : 'var(--text-dim)' }}>{agent.disputes_lost}</span>} />
           <KVRow label="Success Rate" value={`${successRate}%`} />
           <KVRow label="Identity Bond" value={`${(agent.identity_bond_sworn ?? 0).toFixed(4)} SWORN`} />
-          <KVRow label="Volume Processed" value={`${(agent.volume_processed_sol ?? 0).toFixed(4)} SWORN`} />
+          <KVRow label="Volume Processed" value={`${(agent.volume_processed_sworn ?? 0).toFixed(4)} SWORN`} />
           <KVRow label="Status" value={<StatusBadge status={agent.status} />} mono={false} />
         </div>
         <div className="detail-card">
@@ -70,7 +70,7 @@ function AgentDetailView({ pubkey }: { pubkey: string }) {
                 <tr key={c.id}>
                   <td><Link href={`/contracts/?view=${c.id}`} className="addr">#{c.id}</Link></td>
                   <td><span className="badge" style={{ background: 'var(--accent-dim)', color: 'var(--accent)' }}>{c.provider === pubkey ? 'Provider' : 'Requester'}</span></td>
-                  <td className="mono">{(c.value_sol ?? 0).toFixed(4)}</td>
+                  <td className="mono">{(c.value_sworn ?? 0).toFixed(4)}</td>
                   <td><StatusBadge status={c.status} /></td>
                   <td style={{ color: 'var(--text-dim)' }}>{fmtDate(c.created_at)}</td>
                 </tr>

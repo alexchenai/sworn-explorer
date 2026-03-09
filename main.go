@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"math"
@@ -56,7 +57,7 @@ type Agent struct {
 	DisputesLost     uint32  `json:"disputes_lost"`
 	DisputesWon      uint32  `json:"disputes_won"`
 	FraudFlags       uint32  `json:"fraud_flags"`
-	VolumeProcessed  float64 `json:"volume_processed_sol"`
+	VolumeProcessed  float64 `json:"volume_processed_sworn"`
 	IdentityBond     float64 `json:"identity_bond_sworn"`
 	SponsorBonus     uint16  `json:"sponsor_bonus"`
 	RegistrationDate string  `json:"registration_date"`
@@ -70,13 +71,18 @@ type Contract struct {
 	Pubkey         string  `json:"pubkey"`
 	Requester      string  `json:"requester"`
 	Provider       string  `json:"provider"`
-	Value          float64 `json:"value_sol"`
-	ProviderStake  float64 `json:"provider_stake_sol"`
-	RequesterStake float64 `json:"requester_stake_sol"`
+	Value          float64 `json:"value_sworn"`
+	ProviderStake  float64 `json:"provider_stake_sworn"`
+	RequesterStake float64 `json:"requester_stake_sworn"`
 	Status         string  `json:"status"`
 	CreatedAt      string  `json:"created_at"`
 	ResolvedAt     string  `json:"resolved_at,omitempty"`
+	PoeHash        string  `json:"poe_hash,omitempty"`
 	PoeArweaveTx   string  `json:"poe_arweave_tx,omitempty"`
+	PoeInputHash   string  `json:"poe_input_hash,omitempty"`
+	PoeOutputHash  string  `json:"poe_output_hash,omitempty"`
+	PoeSubmittedAt string  `json:"poe_submitted_at,omitempty"`
+	PoeValidated   *bool   `json:"poe_validated,omitempty"`
 	DisputeLevel   uint8   `json:"dispute_level"`
 }
 
@@ -134,6 +140,7 @@ func loadData() *Cache {
 
 	agents := []Agent{}
 	contracts := []Contract{}
+	poeByContract := make(map[string]*tp.ProofOfExecution) // contract PDA -> PoE
 
 	// ---- Fetch all program accounts ----
 	accounts, err := client.GetProgramAccountsWithOpts(ctx, TrustProgramID, &rpc.GetProgramAccountsOpts{
@@ -144,12 +151,25 @@ func loadData() *Cache {
 		log.Printf("getProgramAccounts failed: %v", err)
 	} else {
 		log.Printf("Got %d program accounts from chain", len(accounts))
+
+		// Precompute Anchor discriminators for type detection
+		type disc [8]byte
+		agentDisc := tp.AccountDiscriminator("AgentIdentity")
+		configDisc := tp.AccountDiscriminator("ProtocolConfig")
+		contractDisc := tp.AccountDiscriminator("Contract")
+		poeDisc := tp.AccountDiscriminator("ProofOfExecution")
+
 		for _, acc := range accounts {
 			data := acc.Account.Data.GetBinary()
 			pubkeyStr := acc.Pubkey.String()
+			if len(data) < 8 {
+				continue
+			}
+			var d disc
+			copy(d[:], data[:8])
 
-			switch len(data) {
-			case tp.AgentIdentitySize:
+			switch d {
+			case agentDisc:
 				// Decode as AgentIdentity
 				identity, err := tp.DecodeAgentIdentity(data)
 				if err != nil {
@@ -183,32 +203,24 @@ func loadData() *Cache {
 				log.Printf("Parsed agent: authority=%s tasks=%d matured=%v bond=%d",
 					identity.Authority.String(), identity.TasksCompleted, identity.Matured, identity.IdentityBond)
 
-			case tp.ProtocolConfigSize:
-				// Protocol config — skip for agents/contracts listing
+			case configDisc:
 				log.Printf("Found ProtocolConfig account at %s", pubkeyStr)
 
-			default:
-				// Try to decode as Contract (variable size due to Borsh string)
-				if len(data) >= 157 { // minimum contract size
-					contract, err := tp.DecodeContract(data)
-					if err != nil {
-						log.Printf("DecodeContract failed for %s (len=%d): %v", pubkeyStr, len(data), err)
-						continue
-					}
-					// Sanity check: requester and provider must be non-zero
-					zeroKey := solana.PublicKey{}
-					if contract.Requester == zeroKey || contract.Provider == zeroKey {
-						log.Printf("Skipping account %s: zero requester/provider (likely not a contract)", pubkeyStr)
-						continue
-					}
-					// Sanity check: contract ID must be reasonable (< 1M) and created_at must be after 2025
-					if contract.ID > 1000000 || contract.CreatedAt < 1735689600 || contract.CreatedAt > 1893456000 {
-						log.Printf("Skipping account %s: unreasonable contract ID=%d or timestamp=%d (likely not a contract)", pubkeyStr, contract.ID, contract.CreatedAt)
-						continue
-					}
+			case contractDisc:
+				contract, err := tp.DecodeContract(data)
+				if err != nil {
+					log.Printf("DecodeContract failed for %s (len=%d): %v", pubkeyStr, len(data), err)
+					continue
+				}
 					resolvedAt := ""
 					if contract.ResolvedAt > 0 {
 						resolvedAt = time.Unix(contract.ResolvedAt, 0).UTC().Format(time.RFC3339)
+					}
+					// Convert poe_hash to hex if non-zero
+					poeHashHex := ""
+					var zeroHash [32]byte
+					if contract.PoeHash != zeroHash {
+						poeHashHex = hex.EncodeToString(contract.PoeHash[:])
 					}
 					contracts = append(contracts, Contract{
 						ID:             fmt.Sprintf("%d", contract.ID),
@@ -221,17 +233,48 @@ func loadData() *Cache {
 						Status:         contract.Status.String(),
 						CreatedAt:      time.Unix(contract.CreatedAt, 0).UTC().Format(time.RFC3339),
 						ResolvedAt:     resolvedAt,
+						PoeHash:        poeHashHex,
 						PoeArweaveTx:   contract.PoeArweaveTx,
 						DisputeLevel:   contract.DisputeLevel,
 					})
 					log.Printf("Parsed contract ID=%d requester=%s provider=%s status=%s",
 						contract.ID, contract.Requester.String(), contract.Provider.String(), contract.Status.String())
-				} else {
-					log.Printf("Skipping account %s: unrecognised size %d", pubkeyStr, len(data))
+
+			case poeDisc:
+				poe, err := tp.DecodeProofOfExecution(data)
+				if err != nil {
+					log.Printf("DecodeProofOfExecution failed for %s: %v", pubkeyStr, err)
+					continue
 				}
+				poeByContract[poe.Contract.String()] = poe
+				log.Printf("Parsed PoE for contract %s: input=%x output=%x",
+					poe.Contract.String(), poe.InputHash[:8], poe.OutputHash[:8])
+
+			default:
+				log.Printf("Skipping account %s: unknown discriminator (len=%d)", pubkeyStr, len(data))
 			}
 		}
-		log.Printf("Parsed %d agents and %d contracts", len(agents), len(contracts))
+		log.Printf("Parsed %d agents, %d contracts, %d PoEs", len(agents), len(contracts), len(poeByContract))
+	}
+
+	// ---- Enrich contracts with PoE data ----
+	for i := range contracts {
+		if poe, ok := poeByContract[contracts[i].Pubkey]; ok {
+			var zeroHash [32]byte
+			if poe.InputHash != zeroHash {
+				contracts[i].PoeInputHash = hex.EncodeToString(poe.InputHash[:])
+			}
+			if poe.OutputHash != zeroHash {
+				contracts[i].PoeOutputHash = hex.EncodeToString(poe.OutputHash[:])
+			}
+			if poe.SubmittedAt > 0 {
+				contracts[i].PoeSubmittedAt = time.Unix(poe.SubmittedAt, 0).UTC().Format(time.RFC3339)
+			}
+			contracts[i].PoeValidated = &poe.Validated
+			if poe.ArweaveTx != "" && contracts[i].PoeArweaveTx == "" {
+				contracts[i].PoeArweaveTx = poe.ArweaveTx
+			}
+		}
 	}
 
 	// ---- Insurance pool SOL balance ----
@@ -278,6 +321,12 @@ func loadData() *Cache {
 	for _, a := range agents {
 		tvl += a.IdentityBond
 	}
+	for _, c := range contracts {
+		s := strings.ToLower(c.Status)
+		if s == "active" || s == "delivered" || s == "created" {
+			tvl += c.Value + c.ProviderStake
+		}
+	}
 
 	activeContracts := 0
 	for _, c := range contracts {
@@ -287,10 +336,59 @@ func loadData() *Cache {
 		}
 	}
 
+	// ---- Build activity feed from on-chain data ----
+	var activity []Activity
+	for _, a := range agents {
+		activity = append(activity, Activity{
+			Type:      "agent_registered",
+			Actor:     a.Pubkey,
+			Amount:    a.IdentityBond,
+			Timestamp: a.RegistrationDate,
+			Status:    a.Status,
+		})
+	}
+	for _, c := range contracts {
+		activity = append(activity, Activity{
+			Type:      "contract_created",
+			Actor:     c.Requester,
+			Target:    fmt.Sprintf("Contract #%s", c.ID),
+			Amount:    c.Value,
+			Timestamp: c.CreatedAt,
+			Status:    c.Status,
+		})
+		if c.PoeArweaveTx != "" {
+			activity = append(activity, Activity{
+				Type:      "proof_submitted",
+				Actor:     c.Provider,
+				Target:    fmt.Sprintf("Contract #%s", c.ID),
+				Timestamp: c.CreatedAt, // approximate (no separate deliver timestamp)
+				Status:    "delivered",
+			})
+		}
+		if c.ResolvedAt != "" {
+			activity = append(activity, Activity{
+				Type:      "contract_completed",
+				Actor:     c.Provider,
+				Target:    fmt.Sprintf("Contract #%s", c.ID),
+				Amount:    c.Value,
+				Timestamp: c.ResolvedAt,
+				Status:    "completed",
+			})
+		}
+	}
+	// Sort by timestamp descending
+	for i := 0; i < len(activity); i++ {
+		for j := i + 1; j < len(activity); j++ {
+			if activity[j].Timestamp > activity[i].Timestamp {
+				activity[i], activity[j] = activity[j], activity[i]
+			}
+		}
+	}
+
 	return &Cache{
 		agents:    agents,
 		contracts: contracts,
-		activity:  []Activity{},
+		activity:  activity,
 		stats: Stats{
 			TotalAgents:      len(agents),
 			TotalContracts:   len(contracts),

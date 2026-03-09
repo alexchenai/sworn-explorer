@@ -107,7 +107,7 @@ export default function Dashboard() {
                 ) : contracts.slice(0, 8).map(c => (
                   <tr key={c.id}>
                     <td><Link href={`/contracts/?view=${c.id}`} className="addr">#{c.id}</Link></td>
-                    <td className="mono">{(c.value_sol ?? 0).toFixed(4)}</td>
+                    <td className="mono">{(c.value_sworn ?? 0).toFixed(4)}</td>
                     <td style={{ color: 'var(--text-dim)' }}>{fmtDate(c.created_at)}</td>
                     <td><StatusBadge status={c.status} /></td>
                   </tr>
