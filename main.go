@@ -1,0 +1,430 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"math"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/gagliardetto/solana-go"
+	"github.com/gagliardetto/solana-go/rpc"
+	"github.com/gin-gonic/gin"
+
+	tp "github.com/alexchenai/trust-protocol/sdk/go"
+)
+
+// ---- Constants ----
+
+var (
+	TrustProgramID   = solana.MustPublicKeyFromBase58("CSBAc1SiMALr4rnuCoB17BsddzthB4RAhjibGvyt6p6S")
+	SwornMintAddress = solana.MustPublicKeyFromBase58("DDYtY8WNtzdgkbhA3xfDnwWGJy91x3QSTpBsDoA5jHx7")
+	AdminWallet      = solana.MustPublicKeyFromBase58("8nJoPrMAggwiz9FUEkdkCUrK4XPAc7ZMT8Z49TVLUbEN")
+
+	SolanaRPCEndpoint = "https://api.devnet.solana.com"
+)
+
+// ---- PDA helpers (mirroring ACO pda.go) ----
+
+func FindProtocolConfigPDA() (solana.PublicKey, uint8) {
+	return tp.FindProtocolConfigPDA(TrustProgramID)
+}
+
+func FindAgentIdentityPDA(agent solana.PublicKey) (solana.PublicKey, uint8) {
+	return tp.FindAgentIdentityPDA(TrustProgramID, agent)
+}
+
+func FindContractPDA(contractID uint64) (solana.PublicKey, uint8) {
+	return tp.FindContractPDA(TrustProgramID, contractID)
+}
+
+func FindInsurancePoolPDA() (solana.PublicKey, uint8) {
+	return tp.FindInsurancePoolPDA(TrustProgramID)
+}
+
+// ---- Domain types (for API responses) ----
+
+type Agent struct {
+	Pubkey           string  `json:"pubkey"`
+	Owner            string  `json:"owner"`
+	IdentityPDA      string  `json:"identity_pda"`
+	TrustScore       float64 `json:"trust_score"`
+	TasksCompleted   uint64  `json:"tasks_completed"`
+	TasksAbandoned   uint32  `json:"tasks_abandoned"`
+	DisputesLost     uint32  `json:"disputes_lost"`
+	DisputesWon      uint32  `json:"disputes_won"`
+	FraudFlags       uint32  `json:"fraud_flags"`
+	VolumeProcessed  float64 `json:"volume_processed_sol"`
+	IdentityBond     float64 `json:"identity_bond_sworn"`
+	SponsorBonus     uint16  `json:"sponsor_bonus"`
+	RegistrationDate string  `json:"registration_date"`
+	Matured          bool    `json:"matured"`
+	Banned           bool    `json:"banned"`
+	Status           string  `json:"status"`
+}
+
+type Contract struct {
+	ID             string  `json:"id"`
+	Pubkey         string  `json:"pubkey"`
+	Requester      string  `json:"requester"`
+	Provider       string  `json:"provider"`
+	Value          float64 `json:"value_sol"`
+	ProviderStake  float64 `json:"provider_stake_sol"`
+	RequesterStake float64 `json:"requester_stake_sol"`
+	Status         string  `json:"status"`
+	CreatedAt      string  `json:"created_at"`
+	ResolvedAt     string  `json:"resolved_at,omitempty"`
+	PoeArweaveTx   string  `json:"poe_arweave_tx,omitempty"`
+	DisputeLevel   uint8   `json:"dispute_level"`
+}
+
+type Activity struct {
+	Signature string  `json:"signature"`
+	Type      string  `json:"type"`
+	Actor     string  `json:"actor"`
+	Target    string  `json:"target,omitempty"`
+	Amount    float64 `json:"amount,omitempty"`
+	Timestamp string  `json:"timestamp"`
+	Status    string  `json:"status"`
+	Slot      uint64  `json:"slot"`
+}
+
+type Stats struct {
+	TotalAgents      int     `json:"total_agents"`
+	TotalContracts   int     `json:"total_contracts"`
+	ActiveContracts  int     `json:"active_contracts"`
+	InsurancePoolSOL float64 `json:"insurance_pool_sol"`
+	SwornSupply      float64 `json:"sworn_supply"`
+	SwornMint        string  `json:"sworn_mint"`
+	ProgramID        string  `json:"program_id"`
+	Network          string  `json:"network"`
+	LastUpdated      string  `json:"last_updated"`
+	AvgTrustScore    float64 `json:"avg_trust_score"`
+	TotalValueLocked float64 `json:"total_value_locked"`
+	TotalAgentsChain uint64  `json:"total_agents_chain"`
+	TotalContsChain  uint64  `json:"total_contracts_chain"`
+}
+
+// ---- Cache ----
+
+type Cache struct {
+	agents    []Agent
+	contracts []Contract
+	activity  []Activity
+	stats     Stats
+	loadedAt  time.Time
+}
+
+var cache *Cache
+
+// ---- Data loading using SDK decoders ----
+
+func newRPCClient() *rpc.Client {
+	return rpc.New(SolanaRPCEndpoint)
+}
+
+func loadData() *Cache {
+	log.Println("Loading on-chain data via Trust Protocol SDK...")
+
+	client := newRPCClient()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	agents := []Agent{}
+	contracts := []Contract{}
+
+	// ---- Fetch all program accounts ----
+	accounts, err := client.GetProgramAccountsWithOpts(ctx, TrustProgramID, &rpc.GetProgramAccountsOpts{
+		Encoding:   solana.EncodingBase64,
+		Commitment: rpc.CommitmentConfirmed,
+	})
+	if err != nil {
+		log.Printf("getProgramAccounts failed: %v", err)
+	} else {
+		log.Printf("Got %d program accounts from chain", len(accounts))
+		for _, acc := range accounts {
+			data := acc.Account.Data.GetBinary()
+			pubkeyStr := acc.Pubkey.String()
+
+			switch len(data) {
+			case tp.AgentIdentitySize:
+				// Decode as AgentIdentity
+				identity, err := tp.DecodeAgentIdentity(data)
+				if err != nil {
+					log.Printf("DecodeAgentIdentity failed for %s: %v", pubkeyStr, err)
+					continue
+				}
+				status := "active"
+				if identity.Banned {
+					status = "banned"
+				} else if !identity.Matured {
+					status = "maturing"
+				}
+				agents = append(agents, Agent{
+					Pubkey:           identity.Authority.String(),
+					Owner:            identity.Authority.String(),
+					IdentityPDA:      pubkeyStr,
+					TrustScore:       float64(identity.TrustScore),
+					TasksCompleted:   identity.TasksCompleted,
+					TasksAbandoned:   identity.TasksAbandoned,
+					DisputesLost:     identity.DisputesLost,
+					DisputesWon:      identity.DisputesWon,
+					FraudFlags:       identity.FraudFlags,
+					VolumeProcessed:  roundF(float64(identity.VolumeProcessed)/1e9, 4),
+					IdentityBond:     roundF(float64(identity.IdentityBond)/1e9, 4),
+					SponsorBonus:     identity.SponsorBonus,
+					RegistrationDate: time.Unix(identity.RegisteredAt, 0).UTC().Format(time.RFC3339),
+					Matured:          identity.Matured,
+					Banned:           identity.Banned,
+					Status:           status,
+				})
+				log.Printf("Parsed agent: authority=%s tasks=%d matured=%v bond=%d",
+					identity.Authority.String(), identity.TasksCompleted, identity.Matured, identity.IdentityBond)
+
+			case tp.ProtocolConfigSize:
+				// Protocol config — skip for agents/contracts listing
+				log.Printf("Found ProtocolConfig account at %s", pubkeyStr)
+
+			default:
+				// Try to decode as Contract (variable size due to Borsh string)
+				if len(data) >= 157 { // minimum contract size
+					contract, err := tp.DecodeContract(data)
+					if err != nil {
+						log.Printf("DecodeContract failed for %s (len=%d): %v", pubkeyStr, len(data), err)
+						continue
+					}
+					// Sanity check: requester and provider must be non-zero
+					zeroKey := solana.PublicKey{}
+					if contract.Requester == zeroKey || contract.Provider == zeroKey {
+						log.Printf("Skipping account %s: zero requester/provider (likely not a contract)", pubkeyStr)
+						continue
+					}
+					// Sanity check: contract ID must be reasonable (< 1M) and created_at must be after 2025
+					if contract.ID > 1000000 || contract.CreatedAt < 1735689600 || contract.CreatedAt > 1893456000 {
+						log.Printf("Skipping account %s: unreasonable contract ID=%d or timestamp=%d (likely not a contract)", pubkeyStr, contract.ID, contract.CreatedAt)
+						continue
+					}
+					resolvedAt := ""
+					if contract.ResolvedAt > 0 {
+						resolvedAt = time.Unix(contract.ResolvedAt, 0).UTC().Format(time.RFC3339)
+					}
+					contracts = append(contracts, Contract{
+						ID:             fmt.Sprintf("%d", contract.ID),
+						Pubkey:         pubkeyStr,
+						Requester:      contract.Requester.String(),
+						Provider:       contract.Provider.String(),
+						Value:          roundF(float64(contract.Value)/1e9, 4),
+						ProviderStake:  roundF(float64(contract.ProviderStake)/1e9, 4),
+						RequesterStake: roundF(float64(contract.RequesterStake)/1e9, 4),
+						Status:         contract.Status.String(),
+						CreatedAt:      time.Unix(contract.CreatedAt, 0).UTC().Format(time.RFC3339),
+						ResolvedAt:     resolvedAt,
+						PoeArweaveTx:   contract.PoeArweaveTx,
+						DisputeLevel:   contract.DisputeLevel,
+					})
+					log.Printf("Parsed contract ID=%d requester=%s provider=%s status=%s",
+						contract.ID, contract.Requester.String(), contract.Provider.String(), contract.Status.String())
+				} else {
+					log.Printf("Skipping account %s: unrecognised size %d", pubkeyStr, len(data))
+				}
+			}
+		}
+		log.Printf("Parsed %d agents and %d contracts", len(agents), len(contracts))
+	}
+
+	// ---- Insurance pool SOL balance ----
+	poolSOL := 0.0
+	poolPDA, _ := FindInsurancePoolPDA()
+	if bal, err := client.GetBalance(ctx, poolPDA, rpc.CommitmentConfirmed); err == nil && bal != nil {
+		poolSOL = float64(bal.Value) / 1e9
+	} else {
+		log.Printf("Failed to get insurance pool balance: %v", err)
+	}
+
+	// ---- SWORN token supply ----
+	swornSupply := 0.0
+	if supplyResp, err := client.GetTokenSupply(ctx, SwornMintAddress, rpc.CommitmentConfirmed); err == nil &&
+		supplyResp != nil && supplyResp.Value != nil && supplyResp.Value.UiAmount != nil {
+		swornSupply = *supplyResp.Value.UiAmount
+	} else {
+		log.Printf("Failed to get SWORN token supply: %v", err)
+	}
+
+	// ---- Protocol config (for on-chain total_agents / total_contracts) ----
+	totalAgentsChain := uint64(0)
+	totalContsChain := uint64(0)
+	configPDA, _ := FindProtocolConfigPDA()
+	if info, err := client.GetAccountInfoWithOpts(ctx, configPDA, &rpc.GetAccountInfoOpts{
+		Encoding: solana.EncodingBase64,
+	}); err == nil && info != nil && info.Value != nil {
+		if cfg, err := tp.DecodeProtocolConfig(info.Value.Data.GetBinary()); err == nil {
+			totalAgentsChain = cfg.TotalAgents
+			totalContsChain = cfg.TotalContracts
+		}
+	}
+
+	// ---- Derived stats ----
+	avgTrust := 0.0
+	for _, a := range agents {
+		avgTrust += a.TrustScore
+	}
+	if len(agents) > 0 {
+		avgTrust /= float64(len(agents))
+	}
+
+	tvl := 0.0
+	for _, a := range agents {
+		tvl += a.IdentityBond
+	}
+
+	activeContracts := 0
+	for _, c := range contracts {
+		s := strings.ToLower(c.Status)
+		if s == "active" || s == "delivered" || s == "created" {
+			activeContracts++
+		}
+	}
+
+	return &Cache{
+		agents:    agents,
+		contracts: contracts,
+		activity:  []Activity{},
+		stats: Stats{
+			TotalAgents:      len(agents),
+			TotalContracts:   len(contracts),
+			ActiveContracts:  activeContracts,
+			InsurancePoolSOL: roundF(poolSOL, 4),
+			SwornSupply:      roundF(swornSupply, 2),
+			SwornMint:        SwornMintAddress.String(),
+			ProgramID:        TrustProgramID.String(),
+			Network:          "devnet",
+			LastUpdated:      time.Now().UTC().Format(time.RFC3339),
+			AvgTrustScore:    roundF(avgTrust, 2),
+			TotalValueLocked: roundF(tvl, 4),
+			TotalAgentsChain: totalAgentsChain,
+			TotalContsChain:  totalContsChain,
+		},
+		loadedAt: time.Now(),
+	}
+}
+
+func getCache() *Cache {
+	if cache == nil || time.Since(cache.loadedAt) > 5*time.Minute {
+		cache = loadData()
+	}
+	return cache
+}
+
+func roundF(f float64, decimals int) float64 {
+	pow := math.Pow(10, float64(decimals))
+	return math.Round(f*pow) / pow
+}
+
+// ---- Gin server ----
+
+func main() {
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.Default()
+
+	// CORS middleware
+	r.Use(func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+		c.Next()
+	})
+
+	// API routes
+	api := r.Group("/api")
+	{
+		api.GET("/stats", func(c *gin.Context) { c.JSON(200, getCache().stats) })
+		api.GET("/agents", func(c *gin.Context) { c.JSON(200, getCache().agents) })
+		api.GET("/agents/:pubkey", func(c *gin.Context) {
+			pubkey := c.Param("pubkey")
+			data := getCache()
+			for _, a := range data.agents {
+				if a.Pubkey == pubkey || a.IdentityPDA == pubkey {
+					var related []Contract
+					for _, ct := range data.contracts {
+						if ct.Provider == a.Pubkey || ct.Requester == a.Pubkey {
+							related = append(related, ct)
+						}
+					}
+					c.JSON(200, gin.H{"agent": a, "contracts": related})
+					return
+				}
+			}
+			c.JSON(404, gin.H{"error": "not found"})
+		})
+		api.GET("/contracts", func(c *gin.Context) { c.JSON(200, getCache().contracts) })
+		api.GET("/contracts/:id", func(c *gin.Context) {
+			id := c.Param("id")
+			for _, ct := range getCache().contracts {
+				if ct.ID == id || ct.Pubkey == id {
+					c.JSON(200, ct)
+					return
+				}
+			}
+			c.JSON(404, gin.H{"error": "not found"})
+		})
+		api.GET("/activity", func(c *gin.Context) { c.JSON(200, getCache().activity) })
+		api.GET("/refresh", func(c *gin.Context) {
+			cache = nil
+			data := getCache()
+			c.JSON(200, gin.H{"ok": true, "last_updated": data.stats.LastUpdated})
+		})
+	}
+
+	// Health check
+	r.GET("/health", func(c *gin.Context) { c.JSON(200, gin.H{"status": "ok"}) })
+
+	// Static files from Next.js export
+	staticDir := "/app/static"
+	r.Static("/_next", staticDir+"/_next")
+
+	// Serve HTML pages - Next.js trailingSlash generates index.html in folders
+	pages := []string{"/", "/agents", "/contracts", "/activity"}
+	for _, page := range pages {
+		p := page
+		if p == "/" {
+			r.GET(p, func(c *gin.Context) { c.File(staticDir + "/index.html") })
+		} else {
+			r.GET(p, func(c *gin.Context) { c.File(staticDir + p + "/index.html") })
+			r.GET(p+"/", func(c *gin.Context) { c.File(staticDir + p + "/index.html") })
+		}
+	}
+
+	// Fallback: serve index.html for any unmatched route (SPA)
+	r.NoRoute(func(c *gin.Context) {
+		path := c.Request.URL.Path
+		// Try exact file first
+		filePath := staticDir + path
+		if _, err := os.Stat(filePath); err == nil {
+			c.File(filePath)
+			return
+		}
+		// Try folder/index.html
+		folderPath := staticDir + path + "/index.html"
+		if _, err := os.Stat(folderPath); err == nil {
+			c.File(folderPath)
+			return
+		}
+		// Fallback to root index.html
+		c.File(staticDir + "/index.html")
+	})
+
+	go func() {
+		log.Println("Pre-warming data cache...")
+		getCache()
+	}()
+
+	log.Println("sworn-explorer (Gin + Next.js) listening on :8080")
+	if err := r.Run(":8080"); err != nil {
+		log.Fatal(err)
+	}
+}
