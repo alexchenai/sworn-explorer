@@ -44,7 +44,12 @@ function ContractDetailView({ id }: { id: string }) {
         </div>
         <div className="detail-card">
           <div className="detail-card-title">Proof of Execution</div>
-          <KVRow label="PoE Arweave TX" value={contract.poe_arweave_tx || '—'} />
+          {contract.poe_hash && <KVRow label="PoE Hash (SHA-256)" value={contract.poe_hash} />}
+          {contract.poe_input_hash && <KVRow label="Input Hash" value={contract.poe_input_hash} />}
+          {contract.poe_output_hash && <KVRow label="Output Hash" value={contract.poe_output_hash} />}
+          <KVRow label="Arweave TX" value={contract.poe_arweave_tx || '—'} />
+          {contract.poe_submitted_at && <KVRow label="Submitted" value={fmtDateTime(contract.poe_submitted_at)} />}
+          {contract.poe_validated !== undefined && <KVRow label="Validated" value={contract.poe_validated ? 'Yes' : 'No'} />}
           <KVRow label="Created" value={fmtDateTime(contract.created_at)} />
           {contract.resolved_at && <KVRow label="Resolved" value={fmtDateTime(contract.resolved_at)} />}
         </div>

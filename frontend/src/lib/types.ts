@@ -29,6 +29,11 @@ export interface Contract {
   created_at: string;
   resolved_at?: string;
   poe_arweave_tx?: string;
+  poe_hash?: string;
+  poe_input_hash?: string;
+  poe_output_hash?: string;
+  poe_submitted_at?: string;
+  poe_validated?: boolean;
   dispute_level: number;
 }
 
