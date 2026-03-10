@@ -6,6 +6,8 @@ github.com/alexchenai/trust-protocol/sdk/go v0.1.8-alpha h1:arrPtJAoteeuOir8cRQa
 github.com/alexchenai/trust-protocol/sdk/go v0.1.8-alpha/go.mod h1:6TJG5WOZmMO9y2/7ydnluT7FdVnEYZLRbM3Gld+ltHE=
 github.com/alexchenai/trust-protocol/sdk/go v0.1.9-alpha h1:QvyMLIe6VMPUc0BH4be4o9BPx4coonJSG5SN87ZUQ8E=
 github.com/alexchenai/trust-protocol/sdk/go v0.1.9-alpha/go.mod h1:6TJG5WOZmMO9y2/7ydnluT7FdVnEYZLRbM3Gld+ltHE=
+github.com/alexchenai/trust-protocol/sdk/go v0.1.10-alpha h1:Oklg2EWzTI7rvUAuwatPd+Zh4aTSnlfT/3keT7bo7+I=
+github.com/alexchenai/trust-protocol/sdk/go v0.1.10-alpha/go.mod h1:6TJG5WOZmMO9y2/7ydnluT7FdVnEYZLRbM3Gld+ltHE=
 github.com/andres-erbsen/clock v0.0.0-20160526145045-9e14626cd129 h1:MzBOUgng9orim59UnfUTLRjMpd09C5uEVQ6RPGeCaVI=
 github.com/andres-erbsen/clock v0.0.0-20160526145045-9e14626cd129/go.mod h1:rFgpPQZYZ8vdbc+48xibu8ALc3yeyd64IhHS+PU6Yyg=
 github.com/benbjohnson/clock v1.1.0 h1:Q92kusRqC1XV2MjkWETPvjJVqKetz1OzxZB7mHJLju8=
