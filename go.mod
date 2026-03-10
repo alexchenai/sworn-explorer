@@ -3,7 +3,7 @@ module sworn-explorer
 go 1.25.0
 
 require (
-	github.com/alexchenai/trust-protocol/sdk/go v0.1.10-alpha
+	github.com/alexchenai/trust-protocol/sdk/go v0.1.13-alpha
 	github.com/gagliardetto/solana-go v1.14.0
 	github.com/gin-gonic/gin v1.10.0
 )
