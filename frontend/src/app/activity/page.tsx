@@ -11,6 +11,8 @@ function activityIcon(type: string) {
     case 'deliver': return { icon: 'D', bg: 'var(--yellow-dim)', color: 'var(--yellow)' };
     case 'accept': return { icon: 'A', bg: 'var(--green-dim)', color: 'var(--green)' };
     case 'dispute': return { icon: '!', bg: 'var(--red-dim)', color: 'var(--red)' };
+    case 'contract_proposed': return { icon: 'P', bg: 'rgba(255,191,0,0.12)', color: '#ffbf00' };
+    case 'contract_cancelled': return { icon: 'X', bg: 'rgba(136,136,168,0.15)', color: '#888899' };
     default: return { icon: '?', bg: 'rgba(136,136,168,0.12)', color: 'var(--text-muted)' };
   }
 }

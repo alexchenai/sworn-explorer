@@ -16,6 +16,14 @@ export function statusColor(status: string): { bg: string; color: string } {
   if (s === 'delivered') return { bg: 'rgba(0,212,255,0.10)', color: '#00d4ff' };
   if (s === 'created') return { bg: 'rgba(255,204,0,0.12)', color: '#ffcc00' };
   if (s === 'disputed') return { bg: 'rgba(255,68,102,0.12)', color: '#ff4466' };
+  if (s === 'open') return { bg: 'rgba(255,68,102,0.12)', color: '#ff4466' };
+  if (s === 'responded') return { bg: 'rgba(255,170,0,0.12)', color: '#ffaa00' };
+  if (s === 'voting') return { bg: 'rgba(180,100,255,0.12)', color: '#b464ff' };
+  if (s === 'escalated') return { bg: 'rgba(255,100,50,0.12)', color: '#ff6432' };
+  if (s === 'resolvedprovider') return { bg: 'rgba(0,255,136,0.12)', color: '#00ff88' };
+  if (s === 'resolvedrequester') return { bg: 'rgba(0,212,255,0.10)', color: '#00d4ff' };
+  if (s === 'proposed') return { bg: 'rgba(255,191,0,0.12)', color: '#ffbf00' };
+  if (s === 'cancelled') return { bg: 'rgba(136,136,168,0.15)', color: '#888899' };
   return { bg: 'rgba(136,136,168,0.12)', color: '#8888a8' };
 }
 

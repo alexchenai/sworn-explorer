@@ -22,9 +22,14 @@ export interface Contract {
   pubkey: string;
   requester: string;
   provider: string;
-  value_sworn: number;
-  provider_stake_sworn: number;
-  requester_stake_sworn: number;
+  value: number;
+  currency: string;
+  provider_stake: number;
+  requester_stake: number;
+  // backward compat aliases
+  value_sworn?: number;
+  provider_stake_sworn?: number;
+  requester_stake_sworn?: number;
   status: string;
   created_at: string;
   resolved_at?: string;
@@ -35,6 +40,17 @@ export interface Contract {
   poe_submitted_at?: string;
   poe_validated?: boolean;
   dispute_level: number;
+  dispute_status?: string;
+  dispute_level_name?: string;
+  dispute_initiator?: string;
+  dispute_evidence_hash?: string;
+  dispute_response_hash?: string;
+  dispute_deadline?: string;
+  dispute_created_at?: string;
+  dispute_resolved_at?: string;
+  corrections_count: number;
+  votes_provider?: number;
+  votes_requester?: number;
 }
 
 export interface Activity {

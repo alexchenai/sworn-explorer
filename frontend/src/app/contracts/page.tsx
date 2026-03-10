@@ -37,11 +37,26 @@ function ContractDetailView({ id }: { id: string }) {
           <div className="detail-card-title">Contract Info</div>
           <KVRow label="Requester" value={<Link href={`/agents/?view=${contract.requester}`}>{shortAddr(contract.requester)}</Link>} />
           <KVRow label="Provider" value={<Link href={`/agents/?view=${contract.provider}`}>{shortAddr(contract.provider)}</Link>} />
-          <KVRow label="Value" value={`${(contract.value_sworn ?? 0).toFixed(4)} SWORN`} />
-          <KVRow label="Provider Stake" value={`${(contract.provider_stake_sworn ?? 0).toFixed(4)} SWORN`} />
+          <KVRow label="Value" value={`${(contract.value ?? contract.value_sworn ?? 0).toFixed(4)} ${contract.currency ?? 'SWORN'}`} />
+          <KVRow label="Provider Stake" value={`${(contract.provider_stake ?? contract.provider_stake_sworn ?? 0).toFixed(4)} ${contract.currency ?? 'SWORN'}`} />
           <KVRow label="Status" value={<StatusBadge status={contract.status} />} mono={false} />
           <KVRow label="Dispute Level" value={contract.dispute_level} />
         </div>
+        {contract.dispute_status && (
+        <div className="detail-card">
+          <div className="detail-card-title">Dispute</div>
+          <KVRow label="Status" value={<StatusBadge status={contract.dispute_status} />} mono={false} />
+          <KVRow label="Level" value={contract.dispute_level_name || '—'} />
+          {contract.dispute_initiator && <KVRow label="Initiator" value={<Link href={`/agents/?view=${contract.dispute_initiator}`}>{shortAddr(contract.dispute_initiator)}</Link>} />}
+          <KVRow label="Corrections" value={`${contract.corrections_count} / 3`} />
+          {contract.dispute_evidence_hash && <KVRow label="Evidence Hash" value={contract.dispute_evidence_hash} />}
+          {contract.dispute_response_hash && <KVRow label="Response Hash" value={contract.dispute_response_hash} />}
+          {(contract.votes_provider !== undefined && contract.votes_provider > 0) && <KVRow label="Votes (Provider / Requester)" value={`${contract.votes_provider} / ${contract.votes_requester || 0}`} />}
+          {contract.dispute_deadline && <KVRow label="Deadline" value={fmtDateTime(contract.dispute_deadline)} />}
+          {contract.dispute_created_at && <KVRow label="Opened" value={fmtDateTime(contract.dispute_created_at)} />}
+          {contract.dispute_resolved_at && <KVRow label="Resolved" value={fmtDateTime(contract.dispute_resolved_at)} />}
+        </div>
+        )}
         <div className="detail-card">
           <div className="detail-card-title">Proof of Execution</div>
           {contract.poe_hash && <KVRow label="PoE Hash (SHA-256)" value={contract.poe_hash} />}
@@ -113,20 +128,21 @@ function ContractsList() {
       <div className="table-wrap">
         <table>
           <thead>
-            <tr><th>ID</th><th>Requester</th><th>Provider</th><th>Value (SWORN)</th><th>PoE Reference</th><th>Created</th><th>Status</th></tr>
+            <tr><th>ID</th><th>Requester</th><th>Provider</th><th>Value (SWORN)</th><th>PoE Reference</th><th>Created</th><th>Status</th><th>Dispute</th></tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={7}><div className="empty">{filter ? 'No contracts match' : 'No contracts yet'}</div></td></tr>
+              <tr><td colSpan={8}><div className="empty">{filter ? 'No contracts match' : 'No contracts yet'}</div></td></tr>
             ) : filtered.map(c => (
               <tr key={c.id}>
                 <td><Link href={`/contracts/?view=${c.id}`} className="addr">#{c.id}</Link></td>
                 <td><Link href={`/agents/?view=${c.requester}`} className="addr">{shortAddr(c.requester)}</Link></td>
                 <td><Link href={`/agents/?view=${c.provider}`} className="addr">{shortAddr(c.provider)}</Link></td>
-                <td className="mono">{(c.value_sworn ?? 0).toFixed(4)}</td>
+                <td className="mono">{(c.value ?? c.value_sworn ?? 0).toFixed(4)} {c.currency ?? 'SWORN'}</td>
                 <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--text-muted)' }}>{c.poe_arweave_tx || '—'}</td>
                 <td style={{ color: 'var(--text-dim)' }}>{fmtDate(c.created_at)}</td>
                 <td><StatusBadge status={c.status} /></td>
+                <td>{c.dispute_status ? <StatusBadge status={c.dispute_status} /> : '—'}</td>
               </tr>
             ))}
           </tbody>

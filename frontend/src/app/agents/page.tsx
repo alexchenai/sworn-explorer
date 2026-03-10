@@ -70,7 +70,7 @@ function AgentDetailView({ pubkey }: { pubkey: string }) {
                 <tr key={c.id}>
                   <td><Link href={`/contracts/?view=${c.id}`} className="addr">#{c.id}</Link></td>
                   <td><span className="badge" style={{ background: 'var(--accent-dim)', color: 'var(--accent)' }}>{c.provider === pubkey ? 'Provider' : 'Requester'}</span></td>
-                  <td className="mono">{(c.value_sworn ?? 0).toFixed(4)}</td>
+                  <td className="mono">{(c.value ?? c.value_sworn ?? 0).toFixed(4)} {c.currency ?? 'SWORN'}</td>
                   <td><StatusBadge status={c.status} /></td>
                   <td style={{ color: 'var(--text-dim)' }}>{fmtDate(c.created_at)}</td>
                 </tr>
