@@ -71,9 +71,10 @@ type Contract struct {
 	Pubkey         string  `json:"pubkey"`
 	Requester      string  `json:"requester"`
 	Provider       string  `json:"provider"`
-	Value          float64 `json:"value_sworn"`
-	ProviderStake  float64 `json:"provider_stake_sworn"`
-	RequesterStake float64 `json:"requester_stake_sworn"`
+	Value          float64 `json:"value"`
+	Currency       string  `json:"currency"`
+	ProviderStake  float64 `json:"provider_stake"`
+	RequesterStake float64 `json:"requester_stake"`
 	Status         string  `json:"status"`
 	CreatedAt      string  `json:"created_at"`
 	ResolvedAt     string  `json:"resolved_at,omitempty"`
@@ -84,6 +85,17 @@ type Contract struct {
 	PoeSubmittedAt string  `json:"poe_submitted_at,omitempty"`
 	PoeValidated   *bool   `json:"poe_validated,omitempty"`
 	DisputeLevel   uint8   `json:"dispute_level"`
+	DisputeStatus       string `json:"dispute_status,omitempty"`
+	DisputeLevelName    string `json:"dispute_level_name,omitempty"`
+	DisputeInitiator    string `json:"dispute_initiator,omitempty"`
+	DisputeEvidenceHash string `json:"dispute_evidence_hash,omitempty"`
+	DisputeResponseHash string `json:"dispute_response_hash,omitempty"`
+	DisputeDeadline     string `json:"dispute_deadline,omitempty"`
+	DisputeCreatedAt    string `json:"dispute_created_at,omitempty"`
+	DisputeResolvedAt   string `json:"dispute_resolved_at,omitempty"`
+	CorrectionsCount    uint8  `json:"corrections_count"`
+	VotesProvider       uint16 `json:"votes_provider,omitempty"`
+	VotesRequester      uint16 `json:"votes_requester,omitempty"`
 }
 
 type Activity struct {
@@ -141,6 +153,7 @@ func loadData() *Cache {
 	agents := []Agent{}
 	contracts := []Contract{}
 	poeByContract := make(map[string]*tp.ProofOfExecution) // contract PDA -> PoE
+	disputeByContract := make(map[string]*tp.Dispute)       // contract pubkey -> Dispute
 
 	// ---- Fetch all program accounts ----
 	accounts, err := client.GetProgramAccountsWithOpts(ctx, TrustProgramID, &rpc.GetProgramAccountsOpts{
@@ -158,6 +171,7 @@ func loadData() *Cache {
 		configDisc := tp.AccountDiscriminator("ProtocolConfig")
 		contractDisc := tp.AccountDiscriminator("Contract")
 		poeDisc := tp.AccountDiscriminator("ProofOfExecution")
+		disputeDisc := tp.AccountDiscriminator("Dispute")
 
 		for _, acc := range accounts {
 			data := acc.Account.Data.GetBinary()
@@ -186,7 +200,7 @@ func loadData() *Cache {
 					Pubkey:           identity.Authority.String(),
 					Owner:            identity.Authority.String(),
 					IdentityPDA:      pubkeyStr,
-					TrustScore:       float64(identity.TrustScore),
+					TrustScore:       computeTrustScore(identity),
 					TasksCompleted:   identity.TasksCompleted,
 					TasksAbandoned:   identity.TasksAbandoned,
 					DisputesLost:     identity.DisputesLost,
@@ -228,6 +242,7 @@ func loadData() *Cache {
 						Requester:      contract.Requester.String(),
 						Provider:       contract.Provider.String(),
 						Value:          roundF(float64(contract.Value)/1e9, 4),
+						Currency:       contract.Currency.String(),
 						ProviderStake:  roundF(float64(contract.ProviderStake)/1e9, 4),
 						RequesterStake: roundF(float64(contract.RequesterStake)/1e9, 4),
 						Status:         contract.Status.String(),
@@ -250,11 +265,21 @@ func loadData() *Cache {
 				log.Printf("Parsed PoE for contract %s: input=%x output=%x",
 					poe.Contract.String(), poe.InputHash[:8], poe.OutputHash[:8])
 
+			case disputeDisc:
+				dispute, err := tp.DecodeDispute(data)
+				if err != nil {
+					log.Printf("DecodeDispute failed for %s: %v", pubkeyStr, err)
+					continue
+				}
+				disputeByContract[dispute.Contract.String()] = dispute
+				log.Printf("Parsed dispute for contract %s: level=%s status=%s corrections=%d",
+					dispute.Contract.String(), dispute.Level.String(), dispute.Status.String(), dispute.CorrectionsCount)
+
 			default:
 				log.Printf("Skipping account %s: unknown discriminator (len=%d)", pubkeyStr, len(data))
 			}
 		}
-		log.Printf("Parsed %d agents, %d contracts, %d PoEs", len(agents), len(contracts), len(poeByContract))
+		log.Printf("Parsed %d agents, %d contracts, %d PoEs, %d disputes", len(agents), len(contracts), len(poeByContract), len(disputeByContract))
 	}
 
 	// ---- Enrich contracts with PoE data ----
@@ -274,6 +299,34 @@ func loadData() *Cache {
 			if poe.ArweaveTx != "" && contracts[i].PoeArweaveTx == "" {
 				contracts[i].PoeArweaveTx = poe.ArweaveTx
 			}
+		}
+	}
+
+	// ---- Enrich contracts with Dispute data ----
+	for i := range contracts {
+		if dispute, ok := disputeByContract[contracts[i].Pubkey]; ok {
+			contracts[i].DisputeStatus = dispute.Status.String()
+			contracts[i].DisputeLevelName = dispute.Level.String()
+			contracts[i].DisputeInitiator = dispute.Initiator.String()
+			var zeroHash [32]byte
+			if dispute.EvidenceHash != zeroHash {
+				contracts[i].DisputeEvidenceHash = hex.EncodeToString(dispute.EvidenceHash[:])
+			}
+			if dispute.ResponseHash != zeroHash {
+				contracts[i].DisputeResponseHash = hex.EncodeToString(dispute.ResponseHash[:])
+			}
+			if dispute.Deadline > 0 {
+				contracts[i].DisputeDeadline = time.Unix(dispute.Deadline, 0).UTC().Format(time.RFC3339)
+			}
+			if dispute.CreatedAt > 0 {
+				contracts[i].DisputeCreatedAt = time.Unix(dispute.CreatedAt, 0).UTC().Format(time.RFC3339)
+			}
+			if dispute.ResolvedAt > 0 {
+				contracts[i].DisputeResolvedAt = time.Unix(dispute.ResolvedAt, 0).UTC().Format(time.RFC3339)
+			}
+			contracts[i].CorrectionsCount = dispute.CorrectionsCount
+			contracts[i].VotesProvider = dispute.VotesProvider
+			contracts[i].VotesRequester = dispute.VotesRequester
 		}
 	}
 
@@ -323,7 +376,7 @@ func loadData() *Cache {
 	}
 	for _, c := range contracts {
 		s := strings.ToLower(c.Status)
-		if s == "active" || s == "delivered" || s == "created" {
+		if s == "active" || s == "delivered" || s == "created" || s == "proposed" {
 			tvl += c.Value + c.ProviderStake
 		}
 	}
@@ -331,7 +384,7 @@ func loadData() *Cache {
 	activeContracts := 0
 	for _, c := range contracts {
 		s := strings.ToLower(c.Status)
-		if s == "active" || s == "delivered" || s == "created" {
+		if s == "active" || s == "delivered" || s == "created" || s == "proposed" {
 			activeContracts++
 		}
 	}
@@ -348,8 +401,18 @@ func loadData() *Cache {
 		})
 	}
 	for _, c := range contracts {
+		// Choose activity event type based on contract status
+		eventType := "contract_created"
+		switch strings.ToLower(c.Status) {
+		case "proposed":
+			eventType = "contract_proposed"
+		case "cancelled":
+			if c.ResolvedAt == "" {
+				eventType = "contract_cancelled"
+			}
+		}
 		activity = append(activity, Activity{
-			Type:      "contract_created",
+			Type:      eventType,
 			Actor:     c.Requester,
 			Target:    fmt.Sprintf("Contract #%s", c.ID),
 			Amount:    c.Value,
@@ -525,4 +588,16 @@ func main() {
 	if err := r.Run(":8080"); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// computeTrustScore calculates TrustScore server-side using whitepaper formula.
+// The on-chain TrustScore field is oracle-updated and currently always 0.
+func computeTrustScore(a *tp.AgentIdentity) float64 {
+	now := time.Now().Unix()
+	months := float64(now-a.RegisteredAt) / (30.44 * 86400)
+	if months < 0 {
+		months = 0
+	}
+	score := tp.CalculateTrustScore(a, months, 0, 0)
+	return roundF(score, 2)
 }
