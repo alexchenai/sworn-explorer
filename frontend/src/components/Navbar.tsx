@@ -51,6 +51,7 @@ export default function Navbar() {
             display: 'flex', alignItems: 'center', gap: '0.4rem',
             whiteSpace: 'nowrap'
           }}>
+            <img src="https://sworn.chitacloud.dev/logo.png" alt="SWORN" style={{ height: 28, width: 28, borderRadius: '50%' }} />
             SWORN
             <span style={{
               fontSize: '0.6rem', fontWeight: 600,

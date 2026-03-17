@@ -7,10 +7,10 @@
   --surface3: #20202e;
   --border: #1e1e2e;
   --border2: #2a2a3e;
-  --accent: #00d4ff;
-  --accent2: #0099cc;
-  --accent-dim: rgba(0, 212, 255, 0.10);
-  --accent-glow: rgba(0, 212, 255, 0.20);
+  --accent: #00ff9f;
+  --accent2: #00cc7f;
+  --accent-dim: rgba(0, 255, 159, 0.10);
+  --accent-glow: rgba(0, 255, 159, 0.20);
   --green: #00ff88;
   --green-dim: rgba(0, 255, 136, 0.12);
   --red: #ff4466;

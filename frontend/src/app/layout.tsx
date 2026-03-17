@@ -27,7 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div style={{ marginTop: '0.25rem' }}>
             <a href="https://sworn.chitacloud.dev" target="_blank" rel="noopener">sworn.chitacloud.dev</a>
             {' | '}
-            <a href="https://alexchen.chitacloud.dev/static/trust-token-whitepaper-v0.1.md" target="_blank" rel="noopener">Whitepaper</a>
+            <a href="https://sworn.chitacloud.dev/whitepaper" target="_blank" rel="noopener">Whitepaper</a>
             {' | '}
             <a href="https://github.com/alexchenai/trust-protocol" target="_blank" rel="noopener">GitHub</a>
           </div>
