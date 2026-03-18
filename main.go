@@ -157,15 +157,32 @@ func loadData() *Cache {
 	poeByContract := make(map[string]*tp.ProofOfExecution) // contract PDA -> PoE
 	disputeByContract := make(map[string]*tp.Dispute)       // contract pubkey -> Dispute
 
-	// ---- Fetch all program accounts ----
-	accounts, err := client.GetProgramAccountsWithOpts(ctx, TrustProgramID, &rpc.GetProgramAccountsOpts{
-		Encoding:   solana.EncodingBase64,
-		Commitment: rpc.CommitmentConfirmed,
-	})
-	if err != nil {
-		log.Printf("getProgramAccounts failed: %v", err)
-	} else {
-		log.Printf("Got %d program accounts from chain", len(accounts))
+	// ---- Fetch all program accounts (filtered by discriminator to work with public RPC) ----
+	// api.devnet.solana.com blocks unfiltered getProgramAccounts; use memcmp on discriminator.
+	fetchByDisc := func(disc [8]byte) rpc.GetProgramAccountsResult {
+		filter := rpc.RPCFilter{
+			Memcmp: &rpc.RPCFilterMemcmp{Offset: 0, Bytes: solana.Base58(disc[:])},
+		}
+		res, e := client.GetProgramAccountsWithOpts(ctx, TrustProgramID, &rpc.GetProgramAccountsOpts{
+			Encoding:   solana.EncodingBase64,
+			Commitment: rpc.CommitmentConfirmed,
+			Filters:    []rpc.RPCFilter{filter},
+		})
+		if e != nil {
+			log.Printf("getProgramAccounts (disc=%x) failed: %v", disc, e)
+			return nil
+		}
+		return res
+	}
+
+	agentAccs := fetchByDisc(tp.AccountDiscriminator("AgentIdentity"))
+	contractAccs := fetchByDisc(tp.AccountDiscriminator("Contract"))
+	poeAccs := fetchByDisc(tp.AccountDiscriminator("ProofOfExecution"))
+	disputeAccs := fetchByDisc(tp.AccountDiscriminator("Dispute"))
+	accounts := append(append(append(agentAccs, contractAccs...), poeAccs...), disputeAccs...)
+	log.Printf("Got %d program accounts from chain (%d agents, %d contracts, %d poe, %d disputes)",
+		len(accounts), len(agentAccs), len(contractAccs), len(poeAccs), len(disputeAccs))
+	if true {
 
 		// Precompute Anchor discriminators for type detection
 		type disc [8]byte
