@@ -10,9 +10,9 @@ RUN npm run build
 FROM golang:1-alpine AS backend
 WORKDIR /build
 COPY go.mod go.sum ./
-RUN go mod download
+COPY vendor/ ./vendor/
 COPY main.go .
-RUN CGO_ENABLED=0 go build -o server .
+RUN CGO_ENABLED=0 go build -mod=vendor -o server .
 
 # Stage 3: Final image
 FROM alpine:3.21

@@ -17,4 +17,5 @@ services:
             - go.sum
             - frontend
             - Dockerfile
+            - vendor
         working_directory: /app/data/sworn-explorer

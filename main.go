@@ -63,6 +63,8 @@ type Agent struct {
 	RegistrationDate string  `json:"registration_date"`
 	Matured          bool    `json:"matured"`
 	Banned           bool    `json:"banned"`
+	IsHibernating    bool    `json:"is_hibernating"`
+	HibernationEndsAt string `json:"hibernation_ends_at,omitempty"`
 	Status           string  `json:"status"`
 }
 
@@ -193,26 +195,34 @@ func loadData() *Cache {
 				status := "active"
 				if identity.Banned {
 					status = "banned"
+				} else if identity.IsHibernating {
+					status = "hibernating"
 				} else if !identity.Matured {
 					status = "maturing"
 				}
+				hibernationEndsAt := ""
+				if identity.HibernationEndsAt > 0 {
+					hibernationEndsAt = time.Unix(identity.HibernationEndsAt, 0).UTC().Format(time.RFC3339)
+				}
 				agents = append(agents, Agent{
-					Pubkey:           identity.Authority.String(),
-					Owner:            identity.Authority.String(),
-					IdentityPDA:      pubkeyStr,
-					TrustScore:       computeTrustScore(identity),
-					TasksCompleted:   identity.TasksCompleted,
-					TasksAbandoned:   identity.TasksAbandoned,
-					DisputesLost:     identity.DisputesLost,
-					DisputesWon:      identity.DisputesWon,
-					FraudFlags:       identity.FraudFlags,
-					VolumeProcessed:  roundF(float64(identity.VolumeProcessed)/1e9, 4),
-					IdentityBond:     roundF(float64(identity.IdentityBond)/1e9, 4),
-					SponsorBonus:     identity.SponsorBonus,
-					RegistrationDate: time.Unix(identity.RegisteredAt, 0).UTC().Format(time.RFC3339),
-					Matured:          identity.Matured,
-					Banned:           identity.Banned,
-					Status:           status,
+					Pubkey:            identity.Authority.String(),
+					Owner:             identity.Authority.String(),
+					IdentityPDA:       pubkeyStr,
+					TrustScore:        computeTrustScore(identity),
+					TasksCompleted:    identity.TasksCompleted,
+					TasksAbandoned:    identity.TasksAbandoned,
+					DisputesLost:      identity.DisputesLost,
+					DisputesWon:       identity.DisputesWon,
+					FraudFlags:        identity.FraudFlags,
+					VolumeProcessed:   roundF(float64(identity.VolumeProcessed)/1e9, 4),
+					IdentityBond:      roundF(float64(identity.IdentityBond)/1e9, 4),
+					SponsorBonus:      identity.SponsorBonus,
+					RegistrationDate:  time.Unix(identity.RegisteredAt, 0).UTC().Format(time.RFC3339),
+					Matured:           identity.Matured,
+					Banned:            identity.Banned,
+					IsHibernating:     identity.IsHibernating,
+					HibernationEndsAt: hibernationEndsAt,
+					Status:            status,
 				})
 				log.Printf("Parsed agent: authority=%s tasks=%d matured=%v bond=%d",
 					identity.Authority.String(), identity.TasksCompleted, identity.Matured, identity.IdentityBond)
