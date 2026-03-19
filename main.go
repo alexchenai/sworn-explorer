@@ -66,6 +66,11 @@ type Agent struct {
 	IsHibernating    bool    `json:"is_hibernating"`
 	HibernationEndsAt    string  `json:"hibernation_ends_at,omitempty"`
 	DisputeFrictionTotal uint16  `json:"dispute_friction_total"`
+	ActiveContracts      uint32  `json:"active_agent_contracts"`
+	TotalDeliveries      uint32  `json:"total_deliveries"`
+	CorrectionsReceived  uint32  `json:"corrections_received"`
+	TasksSinceLastHib    uint32  `json:"tasks_since_last_hibernation"`
+	SolVolumeProcessed   float64 `json:"sol_volume_processed"`
 	Status               string  `json:"status"`
 }
 
@@ -96,6 +101,7 @@ type Contract struct {
 	DisputeDeadline     string `json:"dispute_deadline,omitempty"`
 	DisputeCreatedAt    string `json:"dispute_created_at,omitempty"`
 	DisputeResolvedAt   string `json:"dispute_resolved_at,omitempty"`
+	EscrowFactorBps     uint16 `json:"escrow_factor_bps"`
 	CorrectionsCount    uint8  `json:"corrections_count"`
 	VotesProvider       uint16 `json:"votes_provider,omitempty"`
 	VotesRequester      uint16 `json:"votes_requester,omitempty"`
@@ -116,7 +122,10 @@ type Stats struct {
 	TotalAgents      int     `json:"total_agents"`
 	TotalContracts   int     `json:"total_contracts"`
 	ActiveContracts  int     `json:"active_contracts"`
-	InsurancePoolSOL float64 `json:"insurance_pool_sol"`
+	InsurancePoolSOL         float64 `json:"insurance_pool_sol"`
+	InsurancePoolBalance     float64 `json:"insurance_pool_balance_sworn"`
+	InsurancePoolClaimsPaid  float64 `json:"insurance_pool_claims_paid_sworn"`
+	InsurancePoolActiveClaims uint32  `json:"insurance_pool_active_claims"`
 	SwornSupply      float64 `json:"sworn_supply"`
 	SwornMint        string  `json:"sworn_mint"`
 	ProgramID        string  `json:"program_id"`
@@ -241,6 +250,11 @@ func loadData() *Cache {
 					IsHibernating:     identity.IsHibernating,
 					HibernationEndsAt:    hibernationEndsAt,
 					DisputeFrictionTotal: identity.DisputeFrictionTotal,
+					ActiveContracts:      identity.ActiveContracts,
+					TotalDeliveries:      identity.TotalDeliveries,
+					CorrectionsReceived:  identity.CorrectionsReceived,
+					TasksSinceLastHib:    identity.TasksSinceLastHibernation,
+					SolVolumeProcessed:   roundF(float64(identity.VolumeSol)/1e9, 4),
 					Status:               status,
 				})
 				log.Printf("Parsed agent: authority=%s tasks=%d matured=%v bond=%d",
@@ -279,7 +293,8 @@ func loadData() *Cache {
 						ResolvedAt:     resolvedAt,
 						PoeHash:        poeHashHex,
 						PoeArweaveTx:   contract.PoeArweaveTx,
-						DisputeLevel:   contract.DisputeLevel,
+						DisputeLevel:       contract.DisputeLevel,
+						EscrowFactorBps:    contract.EscrowFactorBps,
 					})
 					log.Printf("Parsed contract ID=%d requester=%s provider=%s status=%s",
 						contract.ID, contract.Requester.String(), contract.Provider.String(), contract.Status.String())
@@ -366,6 +381,22 @@ func loadData() *Cache {
 		poolSOL = float64(bal.Value) / 1e9
 	} else {
 		log.Printf("Failed to get insurance pool balance: %v", err)
+	}
+
+	// ---- Insurance pool on-chain data ----
+	poolBalance := 0.0
+	poolClaimsPaid := 0.0
+	var poolActiveClaims uint32
+	if poolAcct, err := client.GetAccountInfoWithOpts(ctx, poolPDA, &rpc.GetAccountInfoOpts{
+		Commitment: rpc.CommitmentConfirmed,
+	}); err == nil && poolAcct != nil && poolAcct.Value != nil {
+		if pool, err := tp.DecodeInsurancePool(poolAcct.Value.Data.GetBinary()); err == nil {
+			poolBalance = roundF(float64(pool.TotalBalance)/1e9, 4)
+			poolClaimsPaid = roundF(float64(pool.TotalClaimsPaid)/1e9, 4)
+			poolActiveClaims = pool.ActiveClaims
+		} else {
+			log.Printf("Failed to decode insurance pool: %v", err)
+		}
 	}
 
 	// ---- SWORN token supply ----
@@ -485,7 +516,10 @@ func loadData() *Cache {
 			TotalAgents:      len(agents),
 			TotalContracts:   len(contracts),
 			ActiveContracts:  activeContracts,
-			InsurancePoolSOL: roundF(poolSOL, 4),
+			InsurancePoolSOL:         roundF(poolSOL, 4),
+			InsurancePoolBalance:     poolBalance,
+			InsurancePoolClaimsPaid:  poolClaimsPaid,
+			InsurancePoolActiveClaims: poolActiveClaims,
 			SwornSupply:      roundF(swornSupply, 2),
 			SwornMint:        SwornMintAddress.String(),
 			ProgramID:        TrustProgramID.String(),
