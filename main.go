@@ -64,8 +64,9 @@ type Agent struct {
 	Matured          bool    `json:"matured"`
 	Banned           bool    `json:"banned"`
 	IsHibernating    bool    `json:"is_hibernating"`
-	HibernationEndsAt string `json:"hibernation_ends_at,omitempty"`
-	Status           string  `json:"status"`
+	HibernationEndsAt    string  `json:"hibernation_ends_at,omitempty"`
+	DisputeFrictionTotal uint16  `json:"dispute_friction_total"`
+	Status               string  `json:"status"`
 }
 
 type Contract struct {
@@ -238,8 +239,9 @@ func loadData() *Cache {
 					Matured:           identity.Matured,
 					Banned:            identity.Banned,
 					IsHibernating:     identity.IsHibernating,
-					HibernationEndsAt: hibernationEndsAt,
-					Status:            status,
+					HibernationEndsAt:    hibernationEndsAt,
+					DisputeFrictionTotal: identity.DisputeFrictionTotal,
+					Status:               status,
 				})
 				log.Printf("Parsed agent: authority=%s tasks=%d matured=%v bond=%d",
 					identity.Authority.String(), identity.TasksCompleted, identity.Matured, identity.IdentityBond)

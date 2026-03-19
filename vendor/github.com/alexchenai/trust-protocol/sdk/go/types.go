@@ -28,7 +28,7 @@ func AccountDiscriminator(accountName string) [8]byte {
 // ---------------------------------------------------------------------------
 
 // AgentIdentity represents a soulbound agent identity on-chain.
-// Anchor discriminator: 8 bytes, then 115 bytes of fields = 123 total.
+// Anchor discriminator: 8 bytes, then 136 bytes of fields = 144 total.
 // Field order mirrors state.rs exactly (Borsh serialization).
 type AgentIdentity struct {
 	Authority                    solana.PublicKey `json:"authority"`
@@ -54,6 +54,7 @@ type AgentIdentity struct {
 	HibernationStartedAt         int64            `json:"hibernation_started_at"`
 	HibernationEndsAt            int64            `json:"hibernation_ends_at"`
 	TasksSinceLastHibernation    uint32           `json:"tasks_since_last_hibernation"`
+	DisputeFrictionTotal         uint16           `json:"dispute_friction_total"`
 	Bump                         uint8            `json:"bump"`
 }
 
@@ -64,13 +65,20 @@ type AgentIdentity struct {
 // + 4(total_deliveries) + 4(corrections_received) + 4(active_contracts)
 // + 8(last_task_completed_at) + 2(sponsor_bonus) + 1(banned)
 // + 1(is_hibernating) + 8(hibernation_started_at) + 8(hibernation_ends_at)
-// + 4(tasks_since_last_hibernation) + 1(bump) = 144
-const AgentIdentitySize = 144
+// + 4(tasks_since_last_hibernation) + 2(dispute_friction_total) + 1(bump) = 146
+const AgentIdentitySize = 146
+
+// OldAgentIdentitySize is the legacy on-chain size before hibernation fields
+// were added (8 disc + 115 fields = 123 bytes). Accounts created before the
+// upgrade still have this size on-chain until they are realloc-ed.
+const OldAgentIdentitySize = 123
 
 // DecodeAgentIdentity parses raw account data (including 8-byte discriminator).
+// It is backward-compatible: accounts with the old 123-byte layout are decoded
+// with hibernation fields defaulting to zero values.
 func DecodeAgentIdentity(data []byte) (*AgentIdentity, error) {
-	if len(data) < AgentIdentitySize {
-		return nil, fmt.Errorf("agent identity data too short: %d < %d", len(data), AgentIdentitySize)
+	if len(data) < OldAgentIdentitySize {
+		return nil, fmt.Errorf("agent identity data too short: %d < %d", len(data), OldAgentIdentitySize)
 	}
 	o := 8 // skip discriminator
 	a := &AgentIdentity{}
@@ -110,16 +118,26 @@ func DecodeAgentIdentity(data []byte) (*AgentIdentity, error) {
 	o += 2
 	a.Banned = data[o] == 1
 	o++
-	// Hibernation fields (§8.6)
-	a.IsHibernating = data[o] == 1
-	o++
-	a.HibernationStartedAt = int64(binary.LittleEndian.Uint64(data[o : o+8]))
-	o += 8
-	a.HibernationEndsAt = int64(binary.LittleEndian.Uint64(data[o : o+8]))
-	o += 8
-	a.TasksSinceLastHibernation = binary.LittleEndian.Uint32(data[o : o+4])
-	o += 4
-	a.Bump = data[o]
+	// Hibernation fields (§8.6) — only present in new 144-byte accounts
+	if len(data) >= AgentIdentitySize {
+		a.IsHibernating = data[o] == 1
+		o++
+		a.HibernationStartedAt = int64(binary.LittleEndian.Uint64(data[o : o+8]))
+		o += 8
+		a.HibernationEndsAt = int64(binary.LittleEndian.Uint64(data[o : o+8]))
+		o += 8
+		a.TasksSinceLastHibernation = binary.LittleEndian.Uint32(data[o : o+4])
+		o += 4
+		// dispute_friction_total (§8.1/§9.3) — only in 146-byte accounts
+		if len(data) >= AgentIdentitySize {
+			a.DisputeFrictionTotal = binary.LittleEndian.Uint16(data[o : o+2])
+			o += 2
+		}
+		a.Bump = data[o]
+	} else {
+		// Legacy 123-byte account: bump is right after banned
+		a.Bump = data[o]
+	}
 	return a, nil
 }
 
@@ -129,7 +147,7 @@ func (a *AgentIdentity) DID() string {
 }
 
 // ProtocolConfig represents the global protocol configuration on-chain.
-// Anchor discriminator: 8 bytes, then 125 bytes = 133 total.
+// Anchor discriminator: 8 bytes, then 138 bytes of fields = 146 total.
 type ProtocolConfig struct {
 	Admin                   solana.PublicKey `json:"admin"`
 	SwornMint               solana.PublicKey `json:"sworn_mint"`
@@ -246,12 +264,11 @@ const (
 	ContractStatusResolvedProvider  ContractStatus = 6
 	ContractStatusResolvedRequester ContractStatus = 7
 	ContractStatusProposed          ContractStatus = 8
-	ContractStatusCancelledExpired  ContractStatus = 9
 )
 
 // String returns the human-readable name.
 func (s ContractStatus) String() string {
-	names := [...]string{"Created", "Active", "Delivered", "Completed", "Disputed", "Cancelled", "ResolvedProvider", "ResolvedRequester", "Proposed", "Cancelled"}
+	names := [...]string{"Created", "Active", "Delivered", "Completed", "Disputed", "Cancelled", "ResolvedProvider", "ResolvedRequester", "Proposed"}
 	if int(s) < len(names) {
 		return names[s]
 	}
@@ -418,7 +435,8 @@ type Dispute struct {
 	CreatedAt        int64            `json:"created_at"`
 	ResolvedAt       int64            `json:"resolved_at"`
 	Bump             uint8            `json:"bump"`
-	CorrectionsCount uint8            `json:"corrections_count"`
+	CorrectionsCount   uint8            `json:"corrections_count"`
+	PrivateRoundsCount uint8            `json:"private_rounds_count"`
 	// AppealStake is deposited by the escalating party at Level 4 (Whitepaper Section 5.4).
 	// On loss, forfeited: 60% insurance, 25% winner, 15% burn (double-or-nothing).
 	// Zero for all levels below Appeal. Added in migrate_dispute_appeal_stake migration.
@@ -429,7 +447,8 @@ type Dispute struct {
 // v0.1.6: 8 + 32 + 32 + 1 + 1 + 32 + 32 + 2 + 2 + 2 + 8 + 8 + 8 + 1 = 169
 // v0.1.7: + 1 (corrections_count) = 170
 // v0.1.12: + 8 (appeal_stake) = 178
-const DisputeSize = 178
+// v0.1.13: + 1 (private_rounds_count) = 179
+const DisputeSize = 179
 
 // DecodeDispute parses raw account data (including 8-byte discriminator).
 // Backward compatible: corrections_count and appeal_stake are zero if data is shorter.
@@ -468,6 +487,10 @@ func DecodeDispute(data []byte) (*Dispute, error) {
 	o++
 	if o < len(data) {
 		d.CorrectionsCount = data[o]
+		o++
+	}
+	if o < len(data) {
+		d.PrivateRoundsCount = data[o]
 		o++
 	}
 	if o+8 <= len(data) {
