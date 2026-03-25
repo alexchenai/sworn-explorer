@@ -168,11 +168,16 @@ type ProtocolConfig struct {
 	ProtocolFeeSolBps       uint16           `json:"protocol_fee_sol_bps"`
 	MaxCorrections          uint8            `json:"max_corrections"`
 	DeadlineValidation      int64            `json:"deadline_validation"`
+	TotalProtocolTasks      uint64           `json:"total_protocol_tasks"`
+	TotalWorkRewardsEmitted uint64           `json:"total_work_rewards_emitted"`
+	BaseWorkReward          uint64           `json:"base_work_reward"`
+	HalvingInterval         uint64           `json:"halving_interval"`
+	MaxWorkRewards          uint64           `json:"max_work_rewards"`
 	Bump                    uint8            `json:"bump"`
 }
 
 // ProtocolConfigSize is the on-chain size including Anchor discriminator.
-const ProtocolConfigSize = 146
+const ProtocolConfigSize = 186
 
 // DecodeProtocolConfig parses raw account data (including 8-byte discriminator).
 func DecodeProtocolConfig(data []byte) (*ProtocolConfig, error) {
@@ -227,6 +232,26 @@ func DecodeProtocolConfig(data []byte) (*ProtocolConfig, error) {
 		c.DeadlineValidation = int64(binary.LittleEndian.Uint64(data[o : o+8]))
 		o += 8
 	}
+	if o+8 <= len(data) {
+		c.TotalProtocolTasks = binary.LittleEndian.Uint64(data[o : o+8])
+		o += 8
+	}
+	if o+8 <= len(data) {
+		c.TotalWorkRewardsEmitted = binary.LittleEndian.Uint64(data[o : o+8])
+		o += 8
+	}
+	if o+8 <= len(data) {
+		c.BaseWorkReward = binary.LittleEndian.Uint64(data[o : o+8])
+		o += 8
+	}
+	if o+8 <= len(data) {
+		c.HalvingInterval = binary.LittleEndian.Uint64(data[o : o+8])
+		o += 8
+	}
+	if o+8 <= len(data) {
+		c.MaxWorkRewards = binary.LittleEndian.Uint64(data[o : o+8])
+		o += 8
+	}
 	if o < len(data) {
 		c.Bump = data[o]
 	}
@@ -263,12 +288,13 @@ const (
 	ContractStatusCancelled         ContractStatus = 5
 	ContractStatusResolvedProvider  ContractStatus = 6
 	ContractStatusResolvedRequester ContractStatus = 7
-	ContractStatusProposed          ContractStatus = 8
+	ContractStatusProposed            ContractStatus = 8
+	ContractStatusCorrectionRequested ContractStatus = 9
 )
 
 // String returns the human-readable name.
 func (s ContractStatus) String() string {
-	names := [...]string{"Created", "Active", "Delivered", "Completed", "Disputed", "Cancelled", "ResolvedProvider", "ResolvedRequester", "Proposed"}
+	names := [...]string{"Created", "Active", "Delivered", "Completed", "Disputed", "Cancelled", "ResolvedProvider", "ResolvedRequester", "Proposed", "CorrectionRequested"}
 	if int(s) < len(names) {
 		return names[s]
 	}
@@ -276,24 +302,30 @@ func (s ContractStatus) String() string {
 }
 
 // Contract represents an on-chain contract between two agents.
+// Field order mirrors state.rs Contract struct exactly (Borsh serialization).
 type Contract struct {
-	ID             uint64           `json:"id"`
-	Requester      solana.PublicKey `json:"requester"`
-	Provider       solana.PublicKey `json:"provider"`
-	Value          uint64           `json:"value"`
-	ProviderStake  uint64           `json:"provider_stake"`
-	RequesterStake uint64           `json:"requester_stake"`
-	Status         ContractStatus   `json:"status"`
-	CreatedAt      int64            `json:"created_at"`
-	ResolvedAt     int64            `json:"resolved_at"`
-	PoeHash        [32]byte         `json:"poe_hash"`
-	PoeArweaveTx   string           `json:"poe_arweave_tx"`
-	DisputeLevel          uint8            `json:"dispute_level"`
-	Bump                  uint8            `json:"bump"`
-	ProposalExpiresAt     int64            `json:"proposal_expires_at"`
-	ProviderStakeRequired uint64           `json:"provider_stake_required"`
-	Currency              Currency         `json:"currency"`
-	EscrowFactorBps       uint16           `json:"escrow_factor_bps"`
+	ID                          uint64           `json:"id"`
+	Requester                   solana.PublicKey `json:"requester"`
+	Provider                    solana.PublicKey `json:"provider"`
+	Value                       uint64           `json:"value"`
+	ProviderStake               uint64           `json:"provider_stake"`
+	RequesterStake              uint64           `json:"requester_stake"`
+	Status                      ContractStatus   `json:"status"`
+	CreatedAt                   int64            `json:"created_at"`
+	ResolvedAt                  int64            `json:"resolved_at"`
+	PoeHash                     [32]byte         `json:"poe_hash"`
+	PoeArweaveTx                string           `json:"poe_arweave_tx"`
+	DisputeLevel                uint8            `json:"dispute_level"`
+	Bump                        uint8            `json:"bump"`
+	ProposalExpiresAt           int64            `json:"proposal_expires_at"`
+	ProviderStakeRequired       uint64           `json:"provider_stake_required"`
+	Currency                    Currency         `json:"currency"`
+	EscrowFactorBps             uint16           `json:"escrow_factor_bps"`
+	SpecHash                    [32]byte         `json:"spec_hash"`
+	CorrectionsUsed             uint8            `json:"corrections_used"`
+	MaxCorrectionsContract      uint8            `json:"max_corrections_contract"`
+	DeadlineValidationContract  int64            `json:"deadline_validation_contract"`
+	Visibility                  uint8            `json:"visibility"`
 }
 
 // DecodeContract parses raw account data (including 8-byte discriminator).
@@ -356,6 +388,27 @@ func DecodeContract(data []byte) (*Contract, error) {
 	}
 	if o+2 <= len(data) {
 		c.EscrowFactorBps = binary.LittleEndian.Uint16(data[o : o+2])
+		o += 2
+	}
+	// New fields added for whitepaper sync (§6.1, §6.4)
+	if o+32 <= len(data) {
+		copy(c.SpecHash[:], data[o:o+32])
+		o += 32
+	}
+	if o < len(data) {
+		c.CorrectionsUsed = data[o]
+		o++
+	}
+	if o < len(data) {
+		c.MaxCorrectionsContract = data[o]
+		o++
+	}
+	if o+8 <= len(data) {
+		c.DeadlineValidationContract = int64(binary.LittleEndian.Uint64(data[o : o+8]))
+		o += 8
+	}
+	if o < len(data) {
+		c.Visibility = data[o]
 	}
 	return c, nil
 }
@@ -437,10 +490,14 @@ type Dispute struct {
 	Bump             uint8            `json:"bump"`
 	CorrectionsCount   uint8            `json:"corrections_count"`
 	PrivateRoundsCount uint8            `json:"private_rounds_count"`
-	// AppealStake is deposited by the escalating party at Level 4 (Whitepaper Section 5.4).
+	// AppealStake is deposited by the escalating party at Level 4 (Whitepaper Section 9.5).
 	// On loss, forfeited: 60% insurance, 25% winner, 15% burn (double-or-nothing).
 	// Zero for all levels below Appeal. Added in migrate_dispute_appeal_stake migration.
 	AppealStake uint64 `json:"appeal_stake"`
+	// ArbitrationFee per party (2% of contract value, Whitepaper §9.4).
+	// Both parties deposit this when escalating to Level 3 (PublicJury).
+	// Winner recovers theirs; loser's fee is distributed to jury validators.
+	ArbitrationFee uint64 `json:"arbitration_fee"`
 }
 
 // DisputeSize is the on-chain size including Anchor discriminator.
@@ -448,7 +505,8 @@ type Dispute struct {
 // v0.1.7: + 1 (corrections_count) = 170
 // v0.1.12: + 8 (appeal_stake) = 178
 // v0.1.13: + 1 (private_rounds_count) = 179
-const DisputeSize = 179
+// v0.1.14: + 8 (arbitration_fee) = 187
+const DisputeSize = 187
 
 // DecodeDispute parses raw account data (including 8-byte discriminator).
 // Backward compatible: corrections_count and appeal_stake are zero if data is shorter.
@@ -495,6 +553,10 @@ func DecodeDispute(data []byte) (*Dispute, error) {
 	}
 	if o+8 <= len(data) {
 		d.AppealStake = binary.LittleEndian.Uint64(data[o : o+8])
+		o += 8
+	}
+	if o+8 <= len(data) {
+		d.ArbitrationFee = binary.LittleEndian.Uint64(data[o : o+8])
 	}
 	return d, nil
 }
@@ -645,15 +707,17 @@ func DecodeInsuranceClaim(data []byte) (*InsuranceClaim, error) {
 // Whitepaper Section 6: Accumulates 60% of confiscated stakes.
 // Size: 8 disc + 8 + 8 + 4 + 32 + 1 = 61 bytes total.
 type InsurancePool struct {
-	TotalBalance      uint64           `json:"total_balance"`
-	TotalClaimsPaid   uint64           `json:"total_claims_paid"`
-	ActiveClaims      uint32           `json:"active_claims"`
-	Authority         solana.PublicKey `json:"authority"`
-	Bump              uint8            `json:"bump"`
+	TotalBalance        uint64           `json:"total_balance"`
+	TotalClaimsPaid     uint64           `json:"total_claims_paid"`
+	ActiveClaims        uint32           `json:"active_claims"`
+	Authority           solana.PublicKey `json:"authority"`
+	TotalActiveExposure uint64           `json:"total_active_exposure"`
+	Bump                uint8            `json:"bump"`
 }
 
 // InsurancePoolSize is the on-chain account size including 8-byte discriminator.
-const InsurancePoolSize = 8 + 8 + 8 + 4 + 32 + 1 // = 61
+// v2: +8 bytes (total_active_exposure) = 69
+const InsurancePoolSize = 8 + 8 + 8 + 4 + 32 + 8 + 1 // = 69
 
 // DecodeInsurancePool parses raw account data (including 8-byte discriminator).
 func DecodeInsurancePool(data []byte) (*InsurancePool, error) {
@@ -670,6 +734,10 @@ func DecodeInsurancePool(data []byte) (*InsurancePool, error) {
 	o += 4
 	p.Authority = solana.PublicKeyFromBytes(data[o : o+32])
 	o += 32
+	if o+8 <= len(data) {
+		p.TotalActiveExposure = binary.LittleEndian.Uint64(data[o : o+8])
+		o += 8
+	}
 	if o < len(data) {
 		p.Bump = data[o]
 	}
