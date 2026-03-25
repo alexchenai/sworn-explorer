@@ -536,10 +536,25 @@ func loadData() *Cache {
 
 var refreshing bool
 
+// emptyCache returns an empty cache so cold-start API calls never block.
+func emptyCache() *Cache {
+	return &Cache{
+		loadedAt:  time.Now(),
+		agents:    []Agent{},
+		contracts: []Contract{},
+		activity:  []Activity{},
+	}
+}
+
 func getCache() *Cache {
 	if cache == nil {
-		// Cold start: must load synchronously
-		cache = loadData()
+		// Cold start: return empty data immediately, load in background
+		cache = emptyCache()
+		go func() {
+			newCache := loadData()
+			cache = newCache
+			log.Println("Cache loaded:", len(cache.agents), "agents,", len(cache.contracts), "contracts,", len(cache.activity), "events")
+		}()
 	} else if time.Since(cache.loadedAt) > 5*time.Minute && !refreshing {
 		// Stale cache: serve stale data immediately and refresh in background
 		refreshing = true
@@ -653,10 +668,9 @@ func main() {
 		c.File(staticDir + "/index.html")
 	})
 
-	go func() {
-		log.Println("Pre-warming data cache...")
-		getCache()
-	}()
+	// Trigger cache pre-load in background (non-blocking startup)
+	log.Println("Pre-warming data cache in background...")
+	getCache()
 
 	log.Println("sworn-explorer (Gin + Next.js) listening on :8080")
 	if err := r.Run(":8080"); err != nil {

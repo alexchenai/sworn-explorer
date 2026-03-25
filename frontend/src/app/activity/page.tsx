@@ -1,6 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
-import { fetchActivity } from '@/lib/api';
+import { useEffect, useState, useCallback } from 'react';
 import { shortAddr, fmtDateTime } from '@/lib/utils';
 import type { Activity } from '@/lib/types';
 
@@ -26,33 +25,66 @@ export default function ActivityPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [slow, setSlow] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
-  useEffect(() => {
-    const slowTimer = setTimeout(() => setSlow(true), 5000);
+  const loadActivity = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    setSlow(false);
+
+    const slowTimer = setTimeout(() => setSlow(true), 4000);
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 35000);
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
 
     fetch('/api/activity', { signal: controller.signal })
-      .then(r => r.json())
-      .then(data => setActivity(Array.isArray(data) ? data : []))
+      .then(r => {
+        if (!r.ok) throw new Error('Server returned ' + r.status);
+        return r.json();
+      })
+      .then(data => {
+        if (Array.isArray(data) && data.length === 0) {
+          // Empty cache - retry once after 3 seconds (server may be loading)
+          if (!retrying) {
+            setRetrying(true);
+            setTimeout(() => loadActivity(), 3000);
+            return;
+          }
+        }
+        setActivity(Array.isArray(data) ? data : []);
+        setRetrying(false);
+      })
       .catch(err => {
-        if (err.name !== 'AbortError') setError('Failed to load activity data.');
-        else setError('Request timed out. The node may be slow. Try refreshing.');
+        if (err.name !== 'AbortError') setError('Failed to load activity. ' + err.message);
+        else setError('Request timed out. The Solana devnet node may be slow. Try refreshing.');
+        setRetrying(false);
       })
       .finally(() => { setLoading(false); clearTimeout(slowTimer); clearTimeout(timeoutId); });
 
     return () => { controller.abort(); clearTimeout(slowTimer); clearTimeout(timeoutId); };
+  }, [retrying]);
+
+  useEffect(() => {
+    const cleanup = loadActivity();
+    return cleanup;
   }, []);
 
   if (loading) return (
     <div className="empty">
       <div className="spinner" />
-      <br />Loading activity...
-      {slow && <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '0.5rem' }}>Syncing with Solana devnet, this may take up to 30 seconds on first load...</div>}
+      <br />{retrying ? 'Syncing with devnet...' : 'Loading activity...'}
+      {slow && <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '0.5rem' }}>Syncing with Solana devnet, this may take a few seconds...</div>}
     </div>
   );
 
-  if (error) return <div className="empty" style={{ color: 'var(--red)' }}>{error}</div>;
+  if (error) return (
+    <div className="empty" style={{ color: 'var(--red)' }}>
+      {error}
+      <br />
+      <button className="btn" onClick={() => loadActivity()} style={{ marginTop: '0.75rem', fontSize: '0.8rem' }}>
+        Try Again
+      </button>
+    </div>
+  );
 
   return (
     <>
@@ -61,7 +93,13 @@ export default function ActivityPage() {
         <span className="section-count">{activity.length} events</span>
       </div>
       {activity.length === 0 ? (
-        <div className="empty">No on-chain activity recorded yet</div>
+        <div className="empty">
+          No on-chain activity recorded yet
+          <br />
+          <button className="btn" onClick={() => loadActivity()} style={{ marginTop: '0.75rem', fontSize: '0.8rem' }}>
+            Refresh
+          </button>
+        </div>
       ) : (
         <div>
           {activity.map((a, i) => {
