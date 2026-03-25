@@ -534,9 +534,20 @@ func loadData() *Cache {
 	}
 }
 
+var refreshing bool
+
 func getCache() *Cache {
-	if cache == nil || time.Since(cache.loadedAt) > 5*time.Minute {
+	if cache == nil {
+		// Cold start: must load synchronously
 		cache = loadData()
+	} else if time.Since(cache.loadedAt) > 5*time.Minute && !refreshing {
+		// Stale cache: serve stale data immediately and refresh in background
+		refreshing = true
+		go func() {
+			defer func() { refreshing = false }()
+			newCache := loadData()
+			cache = newCache
+		}()
 	}
 	return cache
 }
