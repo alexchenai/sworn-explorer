@@ -25,6 +25,11 @@ export async function fetchContract(id: string) {
   return res.json();
 }
 
+export async function fetchDisputes() {
+  const res = await fetch(`${API_BASE}/api/disputes`);
+  return res.json();
+}
+
 export async function fetchActivity() {
   const res = await fetch(`${API_BASE}/api/activity`);
   return res.json();

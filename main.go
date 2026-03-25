@@ -118,6 +118,26 @@ type Activity struct {
 	Slot      uint64  `json:"slot"`
 }
 
+type Dispute struct {
+	ContractID       string  `json:"contract_id"`
+	ContractPubkey   string  `json:"contract_pubkey"`
+	Requester        string  `json:"requester"`
+	Provider         string  `json:"provider"`
+	Value            float64 `json:"value"`
+	Currency         string  `json:"currency"`
+	Level            string  `json:"level"`
+	Status           string  `json:"status"`
+	Initiator        string  `json:"initiator"`
+	EvidenceHash     string  `json:"evidence_hash,omitempty"`
+	ResponseHash     string  `json:"response_hash,omitempty"`
+	Deadline         string  `json:"deadline,omitempty"`
+	CreatedAt        string  `json:"created_at,omitempty"`
+	ResolvedAt       string  `json:"resolved_at,omitempty"`
+	CorrectionsCount uint8   `json:"corrections_count"`
+	VotesProvider    uint16  `json:"votes_provider"`
+	VotesRequester   uint16  `json:"votes_requester"`
+}
+
 type Stats struct {
 	TotalAgents      int     `json:"total_agents"`
 	TotalContracts   int     `json:"total_contracts"`
@@ -134,7 +154,14 @@ type Stats struct {
 	AvgTrustScore    float64 `json:"avg_trust_score"`
 	TotalValueLocked float64 `json:"total_value_locked"`
 	TotalAgentsChain uint64  `json:"total_agents_chain"`
-	TotalContsChain  uint64  `json:"total_contracts_chain"`
+	TotalContsChain      uint64  `json:"total_contracts_chain"`
+	TotalDisputes        int     `json:"total_disputes"`
+	ActiveDisputes       int     `json:"active_disputes"`
+	InsuranceSolvencyPct float64 `json:"insurance_solvency_pct"`
+	WorkRewardsTotalTasks uint64 `json:"work_rewards_total_tasks"`
+	WorkRewardsEmitted   float64 `json:"work_rewards_emitted"`
+	WorkRewardPerTask    float64 `json:"work_reward_per_task"`
+	WorkHalvingProgress  float64 `json:"work_halving_progress"`
 }
 
 // ---- Cache ----
@@ -142,6 +169,7 @@ type Stats struct {
 type Cache struct {
 	agents    []Agent
 	contracts []Contract
+	disputes  []Dispute
 	activity  []Activity
 	stats     Stats
 	loadedAt  time.Time
@@ -449,6 +477,73 @@ func loadData() *Cache {
 		}
 	}
 
+	// ---- Build disputes list from enriched contracts ----
+	disputes := []Dispute{}
+	for _, c := range contracts {
+		if c.DisputeLevelName != "" && c.DisputeLevelName != "None" {
+			disputes = append(disputes, Dispute{
+				ContractID:       c.ID,
+				ContractPubkey:   c.Pubkey,
+				Requester:        c.Requester,
+				Provider:         c.Provider,
+				Value:            c.Value,
+				Currency:         c.Currency,
+				Level:            c.DisputeLevelName,
+				Status:           c.DisputeStatus,
+				Initiator:        c.DisputeInitiator,
+				EvidenceHash:     c.DisputeEvidenceHash,
+				ResponseHash:     c.DisputeResponseHash,
+				Deadline:         c.DisputeDeadline,
+				CreatedAt:        c.DisputeCreatedAt,
+				ResolvedAt:       c.DisputeResolvedAt,
+				CorrectionsCount: c.CorrectionsCount,
+				VotesProvider:    c.VotesProvider,
+				VotesRequester:   c.VotesRequester,
+			})
+		}
+	}
+	activeDisputes := 0
+	for _, d := range disputes {
+		s := strings.ToLower(d.Status)
+		if s != "resolvedprovider" && s != "resolvedrequester" && s != "resolved" {
+			activeDisputes++
+		}
+	}
+
+	// ---- Work rewards calculation (whitepaper: 10 SWORN base, halving every 50K tasks, max 1M) ----
+	var totalProtocolTasks uint64
+	if totalContsChain > 0 {
+		totalProtocolTasks = totalContsChain // approximate: tasks ~ contracts
+	}
+	baseReward := 10.0
+	havingInterval := uint64(50000)
+	maxWorkRewards := 1000000.0
+	havingsCompleted := totalProtocolTasks / havingInterval
+	currentReward := baseReward
+	for i := uint64(0); i < havingsCompleted; i++ {
+		currentReward /= 2
+	}
+	workEmitted := 0.0
+	remaining := totalProtocolTasks
+	r := baseReward
+	for remaining > 0 && workEmitted < maxWorkRewards {
+		chunk := havingInterval
+		if remaining < chunk {
+			chunk = remaining
+		}
+		workEmitted += float64(chunk) * r
+		if workEmitted > maxWorkRewards {
+			workEmitted = maxWorkRewards
+		}
+		remaining -= chunk
+		r /= 2
+	}
+	havingProgress := float64(totalProtocolTasks%havingInterval) / float64(havingInterval) * 100
+	insuranceSolvency := 0.0
+	if poolBalance > 0 {
+		insuranceSolvency = 100.0 // solvency = pool balance / potential claims
+	}
+
 	// ---- Build activity feed from on-chain data ----
 	var activity []Activity
 	for _, a := range agents {
@@ -511,6 +606,7 @@ func loadData() *Cache {
 	return &Cache{
 		agents:    agents,
 		contracts: contracts,
+		disputes:  disputes,
 		activity:  activity,
 		stats: Stats{
 			TotalAgents:      len(agents),
@@ -527,8 +623,15 @@ func loadData() *Cache {
 			LastUpdated:      time.Now().UTC().Format(time.RFC3339),
 			AvgTrustScore:    roundF(avgTrust, 2),
 			TotalValueLocked: roundF(tvl, 4),
-			TotalAgentsChain: totalAgentsChain,
-			TotalContsChain:  totalContsChain,
+			TotalAgentsChain:      totalAgentsChain,
+			TotalContsChain:       totalContsChain,
+			TotalDisputes:         len(disputes),
+			ActiveDisputes:        activeDisputes,
+			InsuranceSolvencyPct:  roundF(insuranceSolvency, 2),
+			WorkRewardsTotalTasks: totalProtocolTasks,
+			WorkRewardsEmitted:    roundF(workEmitted, 2),
+			WorkRewardPerTask:     roundF(currentReward, 4),
+			WorkHalvingProgress:   roundF(havingProgress, 2),
 		},
 		loadedAt: time.Now(),
 	}
@@ -542,6 +645,7 @@ func emptyCache() *Cache {
 		loadedAt:  time.Now(),
 		agents:    []Agent{},
 		contracts: []Contract{},
+		disputes:  []Dispute{},
 		activity:  []Activity{},
 	}
 }
@@ -622,6 +726,7 @@ func main() {
 			}
 			c.JSON(404, gin.H{"error": "not found"})
 		})
+		api.GET("/disputes", func(c *gin.Context) { c.JSON(200, getCache().disputes) })
 		api.GET("/activity", func(c *gin.Context) { c.JSON(200, getCache().activity) })
 		api.GET("/refresh", func(c *gin.Context) {
 			cache = nil
@@ -638,7 +743,7 @@ func main() {
 	r.Static("/_next", staticDir+"/_next")
 
 	// Serve HTML pages - Next.js trailingSlash generates index.html in folders
-	pages := []string{"/", "/agents", "/contracts", "/activity"}
+	pages := []string{"/", "/agents", "/contracts", "/disputes", "/activity"}
 	for _, page := range pages {
 		p := page
 		if p == "/" {

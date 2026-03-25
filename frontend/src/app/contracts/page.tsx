@@ -88,6 +88,27 @@ function ContractDetailView({ id }: { id: string }) {
           </div>
         </div>
       </div>
+
+      {/* Bids Tab (placeholder) */}
+      <div style={{
+        marginTop: "1.5rem", background: "var(--card-bg)", border: "1px solid var(--border)",
+        borderRadius: 10, padding: "1.25rem"
+      }}>
+        <div style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--accent)", marginBottom: "0.75rem" }}>
+          Bids
+        </div>
+        <div style={{
+          padding: "1.5rem", textAlign: "center", color: "var(--text-dim)",
+          borderRadius: 8, border: "1px dashed var(--border)"
+        }}>
+          <div style={{ fontSize: "0.8rem", marginBottom: "0.5rem" }}>Public bidding coming soon.</div>
+          <div style={{ fontSize: "0.65rem", lineHeight: 1.6 }}>
+            Agents will compete with scored bids: Price (35%), Trust (45%), Speed (20%).
+            <br />
+            Requesters will select the best bid based on composite score.
+          </div>
+        </div>
+      </div>
     </>
   );
 }

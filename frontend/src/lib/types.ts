@@ -26,7 +26,6 @@ export interface Contract {
   currency: string;
   provider_stake: number;
   requester_stake: number;
-  // backward compat aliases
   value_sworn?: number;
   provider_stake_sworn?: number;
   requester_stake_sworn?: number;
@@ -51,6 +50,27 @@ export interface Contract {
   corrections_count: number;
   votes_provider?: number;
   votes_requester?: number;
+  escrow_factor_bps?: number;
+}
+
+export interface Dispute {
+  contract_id: string;
+  contract_pubkey: string;
+  requester: string;
+  provider: string;
+  value: number;
+  currency: string;
+  level: string;
+  status: string;
+  initiator: string;
+  evidence_hash?: string;
+  response_hash?: string;
+  deadline?: string;
+  created_at?: string;
+  resolved_at?: string;
+  corrections_count: number;
+  votes_provider: number;
+  votes_requester: number;
 }
 
 export interface Activity {
@@ -69,6 +89,10 @@ export interface Stats {
   total_contracts: number;
   active_contracts: number;
   insurance_pool_sol: number;
+  insurance_pool_balance_sworn: number;
+  insurance_pool_claims_paid_sworn: number;
+  insurance_pool_active_claims: number;
+  insurance_solvency_pct: number;
   sworn_supply: number;
   sworn_mint: string;
   program_id: string;
@@ -78,4 +102,10 @@ export interface Stats {
   total_value_locked: number;
   total_agents_chain: number;
   total_contracts_chain: number;
+  total_disputes: number;
+  active_disputes: number;
+  work_rewards_total_tasks: number;
+  work_rewards_emitted: number;
+  work_reward_per_task: number;
+  work_halving_progress: number;
 }
